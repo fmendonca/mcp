@@ -1,13 +1,24 @@
-# Kubernetes/OpenShift MCP Server
+# OpenShift Kubernetes Operations Server
 
-A FastAPI-based server that provides MCP (Model Context Protocol) endpoints for interacting with Kubernetes/OpenShift APIs, including KubeVirt VirtualMachine resources.
+A FastAPI and MCP server for operational analysis and controlled actions in Kubernetes/OpenShift clusters, including KubeVirt VirtualMachine resources.
+
+Use:
+- REST API: `/api/v1`
+- MCP Streamable HTTP: `/mcp`
+- Swagger/OpenAPI: `/docs`
+- Health probes: `/healthz` and `/readyz`
 
 ## Features
 
-- **Health Check**: `/health` endpoint
+- **Health and Discovery**:
+  - `GET /`
+  - `GET /healthz`
+  - `GET /readyz`
+- **MCP Streamable HTTP**:
+  - Codex-compatible MCP endpoint at `/mcp`
+  - Tools for namespaces, workloads, RBAC, routes, services, pods, events, logs, KubeVirt VMs, rollout restart, pod delete, and resource updates
 - **Kubernetes Core API**: 
-  - List namespaces: `/namespaces`
-  - Get namespace details: `/namespaces/{namespace}`
+  - List/get namespaces
   - List/get/delete pods in a namespace
   - Read pod logs and pod/namespace events
   - List containers with images, readiness, restart counts, limits, and requests
@@ -44,6 +55,7 @@ No additional configuration is needed for authentication.
   - fastapi
   - uvicorn
   - kubernetes
+  - mcp
 
 ## Local Development
 
@@ -55,8 +67,25 @@ pip install --break-system-packages -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 
 # Access the API
-# Health check: http://localhost:8000/health
+# Health check: http://localhost:8000/healthz
 # API docs: http://localhost:8000/docs
+# MCP endpoint: http://localhost:8000/mcp
+```
+
+## Codex MCP Connection
+
+After deploying to OpenShift, connect Codex to the MCP endpoint, not the REST root:
+
+```bash
+codex mcp add openshift --url https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp
+codex mcp list
+```
+
+The REST root remains useful for browsers and curl:
+
+```bash
+curl -k https://mcp-openshift-mcp-server.apps.sno.openocp.com/
+curl -k https://mcp-openshift-mcp-server.apps.sno.openocp.com/api/v1/namespaces
 ```
 
 ## Container Deployment
@@ -192,115 +221,120 @@ rules:
 
 ## API Endpoints
 
-### Health Check
+All primary REST endpoints are versioned under `/api/v1`. The previous unversioned paths are still registered for backwards compatibility, but new clients should use `/api/v1`.
+
+### Health and Discovery
 ```http
-GET /health
+GET /
+GET /healthz
+GET /readyz
 Response: {"status": "ok"}
 ```
 
 ### Namespaces
 ```http
-GET /namespaces
-Response: [{"name": "string", "status": "string"}]
+GET /api/v1/namespaces
+Response: {"kind": "NamespaceList", "count": 1, "items": [...]}
 
-GET /namespaces/{namespace}
+GET /api/v1/namespaces/{namespace}
 Response: Namespace details with labels, annotations, status, and conditions
 ```
 
 ### Pods
 ```http
-GET /namespaces/{namespace}/pods
-Response: Array of pod summaries with containers, resources, status, and conditions
+GET /api/v1/namespaces/{namespace}/pods?label_selector=app%3Ddemo
+Response: {"kind": "PodList", "count": 1, "items": [...]}
 
-GET /namespaces/{namespace}/pods/{pod_name}
+GET /api/v1/namespaces/{namespace}/pods/{pod_name}
 Response: Pod summary
 
-GET /namespaces/{namespace}/pods/{pod_name}/logs?container=app&tail_lines=200&previous=false
+GET /api/v1/namespaces/{namespace}/pods/{pod_name}/logs?container=app&tail_lines=200&previous=false
 Response: Pod log text
 
-GET /namespaces/{namespace}/pods/{pod_name}/events
+GET /api/v1/namespaces/{namespace}/pods/{pod_name}/events
 Response: Array of pod events
 
-DELETE /namespaces/{namespace}/pods/{pod_name}
+DELETE /api/v1/namespaces/{namespace}/pods/{pod_name}
 Body: {"force": false, "grace_period_seconds": 30}
 Response: Delete request status
 ```
 
 ### Containers
 ```http
-GET /namespaces/{namespace}/containers
-Response: Array of containers grouped by pod, including image, resources, readiness, and restarts
+GET /api/v1/namespaces/{namespace}/containers?label_selector=app%3Ddemo
+Response: {"kind": "ContainerList", "count": 1, "items": [...]}
 ```
 
 ### Events
 ```http
-GET /namespaces/{namespace}/events
-Response: Array of namespace events
+GET /api/v1/namespaces/{namespace}/events
+GET /api/v1/namespaces/{namespace}/events?involved_object_name=pod-1&involved_object_kind=Pod
+Response: {"kind": "EventList", "count": 1, "items": [...]}
 ```
 
 ### Services
 ```http
-GET /namespaces/{namespace}/services
-Response: Array of service summaries
+GET /api/v1/namespaces/{namespace}/services
+Response: {"kind": "ServiceList", "count": 1, "items": [...]}
 
-GET /namespaces/{namespace}/services/{service_name}
+GET /api/v1/namespaces/{namespace}/services/{service_name}
 Response: Service summary
 ```
 
 ### Deployments
 ```http
-GET /namespaces/{namespace}/deployments
-Response: Array of deployment summaries
+GET /api/v1/namespaces/{namespace}/deployments?label_selector=app%3Ddemo
+Response: {"kind": "DeploymentList", "count": 1, "items": [...]}
 
-GET /namespaces/{namespace}/deployments/{deployment_name}
+GET /api/v1/namespaces/{namespace}/deployments/{deployment_name}
 Response: Deployment summary
 
-POST /namespaces/{namespace}/deployments/{deployment_name}/rollout/restart
+POST /api/v1/namespaces/{namespace}/deployments/{deployment_name}/rollout/restart
 Response: Rollout restart request status
 
-GET /namespaces/{namespace}/deployments/{deployment_name}/rollout/status
+GET /api/v1/namespaces/{namespace}/deployments/{deployment_name}/rollout/status
 Response: Rollout progress summary
 
-PATCH /namespaces/{namespace}/deployments/{deployment_name}/containers/{container_name}/resources
+PATCH /api/v1/namespaces/{namespace}/deployments/{deployment_name}/containers/{container_name}/resources
 Body: {"limits": {"cpu": "500m", "memory": "512Mi"}, "requests": {"cpu": "250m", "memory": "256Mi"}}
 Response: Updated container resource summary
 ```
 
 ### Jobs and CronJobs
 ```http
-GET /namespaces/{namespace}/jobs
-GET /namespaces/{namespace}/jobs/{job_name}
-GET /namespaces/{namespace}/cronjobs
-GET /namespaces/{namespace}/cronjobs/{cronjob_name}
+GET /api/v1/namespaces/{namespace}/jobs
+GET /api/v1/namespaces/{namespace}/jobs/{job_name}
+GET /api/v1/namespaces/{namespace}/cronjobs
+GET /api/v1/namespaces/{namespace}/cronjobs/{cronjob_name}
 Response: Batch resource summaries
 ```
 
 ### RBAC
 ```http
-GET /namespaces/{namespace}/rbac/roles
-GET /namespaces/{namespace}/rbac/roles/{role_name}
-GET /namespaces/{namespace}/rbac/rolebindings
-GET /namespaces/{namespace}/rbac/rolebindings/{role_binding_name}
-GET /rbac/clusterroles
-GET /rbac/clusterroles/{cluster_role_name}
-GET /rbac/clusterrolebindings
-GET /rbac/clusterrolebindings/{cluster_role_binding_name}
+GET /api/v1/namespaces/{namespace}/rbac/roles
+GET /api/v1/namespaces/{namespace}/rbac/roles/{role_name}
+GET /api/v1/namespaces/{namespace}/rbac/rolebindings
+GET /api/v1/namespaces/{namespace}/rbac/rolebindings/{role_binding_name}
+GET /api/v1/rbac/clusterroles
+GET /api/v1/rbac/clusterroles/{cluster_role_name}
+GET /api/v1/rbac/clusterrolebindings
+GET /api/v1/rbac/clusterrolebindings/{cluster_role_binding_name}
 Response: RBAC rules, role refs, and subjects
 ```
 
 ### OpenShift Routes
 ```http
-GET /namespaces/{namespace}/routes
-GET /namespaces/{namespace}/routes/{route_name}
+GET /api/v1/namespaces/{namespace}/routes
+GET /api/v1/namespaces/{namespace}/routes/{route_name}
 Response: Route host, target service, port, TLS, and ingress data
 ```
 
 ### VirtualMachines (KubeVirt)
 ```http
-GET /namespaces/{namespace}/virtualmachines
+GET /api/v1/namespaces/{namespace}/virtualmachines
 Response: Array of VirtualMachine objects
 
-GET /namespaces/{namespace}/virtualmachines/{vm_name}
+GET /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}
 Response: Single VirtualMachine object
 ```
 
@@ -315,6 +349,8 @@ Currently, the server doesn't require any specific environment variables for bas
 - The server uses the official Kubernetes Python client
 - KubeVirt integration is done through the CustomObjectsApi since VirtualMachines are CRDs
 - Error handling returns appropriate HTTP status codes:
+  - 401: Kubernetes authentication failed
+  - 403: Forbidden by Kubernetes RBAC
   - 404: Resource not found
   - 500: Internal server error (includes Kubernetes API error details)
 - CORS is not enabled by default; add middleware if needed for browser access

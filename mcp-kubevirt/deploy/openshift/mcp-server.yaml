@@ -89,8 +89,13 @@ spec:
       serviceAccountName: mcp-openshift
       containers:
       - name: mcp-openshift
-        image: quay.io/fcalomen/mcp-openshift:0.2
+        image: quay.io/fcalomen/mcp-openshift:0.2.1
         imagePullPolicy: Always
+        env:
+        - name: MCP_ALLOWED_HOSTS
+          value: "mcp-openshift-mcp-server.apps.sno.openocp.com,127.0.0.1:*,localhost:*"
+        - name: MCP_ALLOWED_ORIGINS
+          value: "https://mcp-openshift-mcp-server.apps.sno.openocp.com,http://127.0.0.1:*,http://localhost:*"
         ports:
         - name: http
           containerPort: 8000

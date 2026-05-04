@@ -1,4 +1,5 @@
 import contextlib
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -7,6 +8,7 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 KUBEVIRT_GROUP = "kubevirt.io"
@@ -16,6 +18,13 @@ KUBEVIRT_PLURAL = "virtualmachines"
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"
 OPENSHIFT_ROUTE_VERSION = "v1"
 OPENSHIFT_ROUTE_PLURAL = "routes"
+
+
+def csv_env(name: str, default: List[str]) -> List[str]:
+    value = os.getenv(name)
+    if not value:
+        return default
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 class DeleteOptions(BaseModel):
@@ -649,6 +658,16 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/",
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=csv_env(
+            "MCP_ALLOWED_HOSTS",
+            ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        ),
+        allowed_origins=csv_env(
+            "MCP_ALLOWED_ORIGINS",
+            ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+        ),
+    ),
 )
 
 
@@ -850,7 +869,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="OpenShift Kubernetes Operations Server",
-    version="0.2.0",
+    version="0.2.1",
     description=(
         "Production REST and MCP server for OpenShift/Kubernetes operational analysis. "
         "Use /api/v1 for REST and /mcp for MCP Streamable HTTP."

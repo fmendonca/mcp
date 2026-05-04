@@ -1,6 +1,6 @@
 # Development
 
-- Install dependencies: `pip install --break-system-packages -r requirements.txt`
+- Install dependencies: `pip install --break-system-packages -r requirements.txt` (Alpine requires --break-system-packages)
 - Run server: `uvicorn main:app --host 0.0.0.0 --port 8000`
 - API docs: http://localhost:8000/docs
 - Health check: http://localhost:8000/health
@@ -17,7 +17,8 @@
 
 # Notes
 
-- Authentication: Uses in-cluster config if available, else falls back to local kubeconfig.
-- No tests/linting configured; verify by running and hitting endpoints.
-- Requires `--break-system-packages` for pip due to Alpine's externally managed environment.
-- Server entrypoint: `uvicorn main:app --host 0.0.0.0 --port 8000` (from Dockerfile CMD)
+- Authentication: Uses in-cluster config if available, else falls back to local kubeconfig (no extra config needed)
+- No tests/linting configured; verify by running and hitting endpoints
+- Requires `--break-system-packages` for pip due to Alpine's externally managed environment
+- For deployment: RBAC needs get/list on namespaces, pods, and virtualmachines.kubevirt.io
+- No environment variables required for basic operation

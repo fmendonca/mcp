@@ -93,9 +93,9 @@ spec:
         imagePullPolicy: Always
         env:
         - name: MCP_ALLOWED_HOSTS
-          value: "mcp-openshift-mcp-server.apps.sno.openocp.com,127.0.0.1:*,localhost:*"
+          value: "mcp-openshift-mcp-server.apps.sno.openocp.com,mcp-openshift-mcp-server.apps.sno.openocp.com:*,127.0.0.1:*,localhost:*"
         - name: MCP_ALLOWED_ORIGINS
-          value: "https://mcp-openshift-mcp-server.apps.sno.openocp.com,http://127.0.0.1:*,http://localhost:*"
+          value: "https://mcp-openshift-mcp-server.apps.sno.openocp.com,https://mcp-openshift-mcp-server.apps.sno.openocp.com:*,http://127.0.0.1:*,http://localhost:*"
         ports:
         - name: http
           containerPort: 8000

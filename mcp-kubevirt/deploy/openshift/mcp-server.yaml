@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-openshift
+  namespace: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-openshift
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+rules:
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["events", "services"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "patch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+  verbs: ["get", "list"]
+- apiGroups: ["route.openshift.io"]
+  resources: ["routes"]
+  verbs: ["get", "list"]
+- apiGroups: ["kubevirt.io"]
+  resources: ["virtualmachines"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-openshift
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-openshift
+subjects:
+- kind: ServiceAccount
+  name: mcp-openshift
+  namespace: mcp-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-openshift
+  namespace: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mcp-openshift
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mcp-openshift
+        app.kubernetes.io/part-of: mcp-server
+    spec:
+      serviceAccountName: mcp-openshift
+      containers:
+      - name: mcp-openshift
+        image: quay.io/fcalomen/mcp-openshift:0.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-openshift
+  namespace: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+spec:
+  selector:
+    app.kubernetes.io/name: mcp-openshift
+  ports:
+  - name: http
+    port: 8000
+    targetPort: http
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mcp-openshift
+  namespace: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+spec:
+  to:
+    kind: Service
+    name: mcp-openshift
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

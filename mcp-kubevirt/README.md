@@ -7,7 +7,24 @@ A FastAPI-based server that provides MCP (Model Context Protocol) endpoints for 
 - **Health Check**: `/health` endpoint
 - **Kubernetes Core API**: 
   - List namespaces: `/namespaces`
-  - List pods in a namespace: `/namespaces/{namespace}/pods`
+  - Get namespace details: `/namespaces/{namespace}`
+  - List/get/delete pods in a namespace
+  - Read pod logs and pod/namespace events
+  - List containers with images, readiness, restart counts, limits, and requests
+  - List/get services
+- **Kubernetes Apps API**:
+  - List/get deployments
+  - Request deployment rollout restart
+  - Inspect deployment rollout status
+  - Update deployment container CPU/memory limits and requests
+- **Kubernetes Batch API**:
+  - List/get CronJobs
+  - List/get Jobs
+- **Kubernetes RBAC API**:
+  - List/get Roles and RoleBindings by namespace
+  - List/get ClusterRoles and ClusterRoleBindings
+- **OpenShift Route API**:
+  - List/get routes via `route.openshift.io/v1`
 - **KubeVirt API** (via Custom Objects):
   - List VirtualMachines in a namespace: `/namespaces/{namespace}/virtualmachines`
   - Get specific VirtualMachine: `/namespaces/{namespace}/virtualmachines/{vm_name}`
@@ -110,7 +127,18 @@ spec:
 
 Create a Role or ClusterRole with permissions to:
 - `namespaces`: get, list
-- `pods`: get, list
+- `pods`: get, list, delete
+- `pods/log`: get
+- `events`: get, list
+- `services`: get, list
+- `deployments.apps`: get, list, patch
+- `jobs.batch`: get, list
+- `cronjobs.batch`: get, list
+- `roles.rbac.authorization.k8s.io`: get, list
+- `rolebindings.rbac.authorization.k8s.io`: get, list
+- `clusterroles.rbac.authorization.k8s.io`: get, list
+- `clusterrolebindings.rbac.authorization.k8s.io`: get, list
+- `routes.route.openshift.io`: get, list (if using OpenShift)
 - `virtualmachines.kubevirt.io`: get, list (if using KubeVirt)
 
 Example Role:
@@ -121,10 +149,44 @@ metadata:
   name: mcp-server-role
 rules:
 - apiGroups: [""]
-  resources: ["namespaces", "pods"]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+- apiGroups: [""]
+  resources: ["events", "services"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "patch"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings"]
+  verbs: ["get", "list"]
+- apiGroups: ["route.openshift.io"]
+  resources: ["routes"]
   verbs: ["get", "list"]
 - apiGroups: ["kubevirt.io"]
   resources: ["virtualmachines"]
+  verbs: ["get", "list"]
+```
+
+Namespace and cluster-wide RBAC resources require a ClusterRole:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-server-cluster-role
+rules:
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles", "clusterrolebindings"]
   verbs: ["get", "list"]
 ```
 
@@ -140,12 +202,97 @@ Response: {"status": "ok"}
 ```http
 GET /namespaces
 Response: [{"name": "string", "status": "string"}]
+
+GET /namespaces/{namespace}
+Response: Namespace details with labels, annotations, status, and conditions
 ```
 
 ### Pods
 ```http
 GET /namespaces/{namespace}/pods
-Response: [{"name": "string", "phase": "string"}]
+Response: Array of pod summaries with containers, resources, status, and conditions
+
+GET /namespaces/{namespace}/pods/{pod_name}
+Response: Pod summary
+
+GET /namespaces/{namespace}/pods/{pod_name}/logs?container=app&tail_lines=200&previous=false
+Response: Pod log text
+
+GET /namespaces/{namespace}/pods/{pod_name}/events
+Response: Array of pod events
+
+DELETE /namespaces/{namespace}/pods/{pod_name}
+Body: {"force": false, "grace_period_seconds": 30}
+Response: Delete request status
+```
+
+### Containers
+```http
+GET /namespaces/{namespace}/containers
+Response: Array of containers grouped by pod, including image, resources, readiness, and restarts
+```
+
+### Events
+```http
+GET /namespaces/{namespace}/events
+Response: Array of namespace events
+```
+
+### Services
+```http
+GET /namespaces/{namespace}/services
+Response: Array of service summaries
+
+GET /namespaces/{namespace}/services/{service_name}
+Response: Service summary
+```
+
+### Deployments
+```http
+GET /namespaces/{namespace}/deployments
+Response: Array of deployment summaries
+
+GET /namespaces/{namespace}/deployments/{deployment_name}
+Response: Deployment summary
+
+POST /namespaces/{namespace}/deployments/{deployment_name}/rollout/restart
+Response: Rollout restart request status
+
+GET /namespaces/{namespace}/deployments/{deployment_name}/rollout/status
+Response: Rollout progress summary
+
+PATCH /namespaces/{namespace}/deployments/{deployment_name}/containers/{container_name}/resources
+Body: {"limits": {"cpu": "500m", "memory": "512Mi"}, "requests": {"cpu": "250m", "memory": "256Mi"}}
+Response: Updated container resource summary
+```
+
+### Jobs and CronJobs
+```http
+GET /namespaces/{namespace}/jobs
+GET /namespaces/{namespace}/jobs/{job_name}
+GET /namespaces/{namespace}/cronjobs
+GET /namespaces/{namespace}/cronjobs/{cronjob_name}
+Response: Batch resource summaries
+```
+
+### RBAC
+```http
+GET /namespaces/{namespace}/rbac/roles
+GET /namespaces/{namespace}/rbac/roles/{role_name}
+GET /namespaces/{namespace}/rbac/rolebindings
+GET /namespaces/{namespace}/rbac/rolebindings/{role_binding_name}
+GET /rbac/clusterroles
+GET /rbac/clusterroles/{cluster_role_name}
+GET /rbac/clusterrolebindings
+GET /rbac/clusterrolebindings/{cluster_role_binding_name}
+Response: RBAC rules, role refs, and subjects
+```
+
+### OpenShift Routes
+```http
+GET /namespaces/{namespace}/routes
+GET /namespaces/{namespace}/routes/{route_name}
+Response: Route host, target service, port, TLS, and ingress data
 ```
 
 ### VirtualMachines (KubeVirt)

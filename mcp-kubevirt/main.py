@@ -1,10 +1,12 @@
 import contextlib
 import os
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
@@ -19,12 +21,41 @@ OPENSHIFT_ROUTE_GROUP = "route.openshift.io"
 OPENSHIFT_ROUTE_VERSION = "v1"
 OPENSHIFT_ROUTE_PLURAL = "routes"
 
+AUTH_TOKEN_PLACEHOLDERS = {
+    "replace-with-generated-token",
+    "change-me",
+    "changeme",
+}
+AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN")
+if AUTH_TOKEN in AUTH_TOKEN_PLACEHOLDERS:
+    raise RuntimeError("MCP_AUTH_TOKEN must be replaced with a generated secret token")
+
+AUTH_PROTECTED_PREFIXES = (
+    "/mcp",
+    "/api/v1",
+    "/namespaces",
+    "/rbac",
+)
+
 
 def csv_env(name: str, default: List[str]) -> List[str]:
     value = os.getenv(name)
     if not value:
         return default
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def is_authorized_request(request: Request) -> bool:
+    if not AUTH_TOKEN:
+        return True
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() == "bearer" and secrets.compare_digest(token, AUTH_TOKEN):
+        return True
+
+    api_key = request.headers.get("x-mcp-api-key", "")
+    return bool(api_key) and secrets.compare_digest(api_key, AUTH_TOKEN)
 
 
 class DeleteOptions(BaseModel):
@@ -877,6 +908,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp.streamable_http_app())
+
+
+@app.middleware("http")
+async def require_authentication(request: Request, call_next):
+    if request.url.path.startswith(AUTH_PROTECTED_PREFIXES) and not is_authorized_request(request):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Missing or invalid authentication token"},
+            headers={
+                "WWW-Authenticate": 'Bearer realm="mcp-kubevirt"',
+            },
+        )
+    return await call_next(request)
 
 
 @app.get("/")

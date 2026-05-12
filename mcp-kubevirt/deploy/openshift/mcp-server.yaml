@@ -15,6 +15,18 @@ metadata:
     app.kubernetes.io/name: mcp-openshift
     app.kubernetes.io/part-of: mcp-server
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-openshift-auth
+  namespace: mcp-server
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+type: Opaque
+stringData:
+  token: "replace-with-generated-token"
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -96,6 +108,11 @@ spec:
           value: "mcp-openshift-mcp-server.apps.sno.openocp.com,mcp-openshift-mcp-server.apps.sno.openocp.com:*,127.0.0.1:*,localhost:*"
         - name: MCP_ALLOWED_ORIGINS
           value: "https://mcp-openshift-mcp-server.apps.sno.openocp.com,https://mcp-openshift-mcp-server.apps.sno.openocp.com:*,http://127.0.0.1:*,http://localhost:*"
+        - name: MCP_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: mcp-openshift-auth
+              key: token
         ports:
         - name: http
           containerPort: 8000

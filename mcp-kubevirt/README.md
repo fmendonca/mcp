@@ -42,11 +42,48 @@ Use:
 
 ## Authentication
 
-The server automatically handles Kubernetes authentication:
+The server has two authentication layers:
+
+### Client authentication for MCP and REST
+
+Set `MCP_AUTH_TOKEN` to require clients to authenticate before they can call operational endpoints.
+
+- Protected: `/mcp`, `/api/v1`, `/namespaces`, `/rbac`
+- Public: `/`, `/docs`, `/openapi.json`, `/healthz`, `/readyz`
+- Accepted headers:
+  - `Authorization: Bearer <token>`
+  - `X-MCP-API-Key: <token>`
+
+If `MCP_AUTH_TOKEN` is not set, client authentication is disabled. This is convenient for local development but should not be used for a shared or public endpoint.
+
+Generate a token:
+
+```bash
+openssl rand -hex 32
+```
+
+Run locally with authentication:
+
+```bash
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+Test the protected MCP endpoint:
+
+```bash
+curl -i http://localhost:8000/mcp
+curl -i -H "Authorization: Bearer $MCP_AUTH_TOKEN" http://localhost:8000/mcp
+```
+
+### Kubernetes authentication
+
+The server automatically handles Kubernetes authentication for calls made from the server to the cluster:
+
 1. **In-cluster**: When running inside a Kubernetes/OpenShift pod, it uses the service account token
 2. **Local development**: Falls back to your local `~/.kube/config` file
 
-No additional configuration is needed for authentication.
+No additional configuration is needed for Kubernetes authentication.
 
 ## Requirements
 
@@ -74,18 +111,105 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## Codex MCP Connection
 
-After deploying to OpenShift, connect Codex to the MCP endpoint, not the REST root:
+After deploying to OpenShift, connect Codex to the MCP endpoint, not the REST root.
 
 ```bash
-codex mcp add openshift --url https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+codex mcp add openshift --url https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp \
+  --bearer-token-env-var MCP_AUTH_TOKEN
 codex mcp list
+```
+
+Alternatively, add it in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.openshift]
+url = "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp"
+bearer_token_env_var = "MCP_AUTH_TOKEN"
 ```
 
 The REST root remains useful for browsers and curl:
 
 ```bash
 curl -k https://mcp-openshift-mcp-server.apps.sno.openocp.com/
-curl -k https://mcp-openshift-mcp-server.apps.sno.openocp.com/api/v1/namespaces
+curl -k -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  https://mcp-openshift-mcp-server.apps.sno.openocp.com/api/v1/namespaces
+```
+
+## MCP Client Configuration
+
+Use the Streamable HTTP endpoint `/mcp` and send the same bearer token in every client.
+
+### VS Code with GitHub Copilot
+
+Create `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "inputs": [
+    {
+      "id": "mcp-kubevirt-token",
+      "type": "promptString",
+      "description": "MCP KubeVirt token",
+      "password": true
+    }
+  ],
+  "servers": {
+    "openshift-kubevirt": {
+      "type": "http",
+      "url": "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:mcp-kubevirt-token}"
+      }
+    }
+  }
+}
+```
+
+Start the server from the MCP servers view or use GitHub Copilot Chat in Agent mode.
+
+### Claude Code
+
+```bash
+claude mcp add --transport http openshift-kubevirt \
+  https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp \
+  --header "Authorization: Bearer $MCP_AUTH_TOKEN"
+```
+
+Project `.mcp.json` alternative:
+
+```json
+{
+  "mcpServers": {
+    "openshift-kubevirt": {
+      "type": "http",
+      "url": "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_AUTH_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### OpenClaw
+
+Add a remote Streamable HTTP server to your OpenClaw config:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "openshift-kubevirt": {
+        "transport": "streamable-http",
+        "url": "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp",
+        "headers": {
+          "Authorization": "Bearer ${MCP_AUTH_TOKEN}"
+        }
+      }
+    }
+  }
+}
 ```
 
 ## Container Deployment
@@ -113,6 +237,14 @@ podman manifest push quay.io/youruser/mcp-openshift:0.0.1
 ### Running in Kubernetes/OpenShift
 
 ```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-openshift-auth
+type: Opaque
+stringData:
+  token: "replace-with-generated-token"
+---
 # Example Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -137,6 +269,11 @@ spec:
         env:
         - name: LOG_LEVEL
           value: "info"
+        - name: MCP_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: mcp-openshift-auth
+              key: token
 ---
 apiVersion: v1
 kind: Service
@@ -150,6 +287,15 @@ spec:
     port: 8000
     targetPort: 8000
   type: ClusterIP
+```
+
+Replace the sample token before applying the manifest. The server refuses known placeholder values at startup. If you already applied the sample manifest, patch the Secret and restart the deployment:
+
+```bash
+oc -n mcp-server patch secret mcp-openshift-auth \
+  --type merge \
+  -p "{\"stringData\":{\"token\":\"$(openssl rand -hex 32)\"}}"
+oc -n mcp-server rollout restart deployment/mcp-openshift
 ```
 
 ### Required RBAC Permissions

@@ -1,0 +1,11 @@
+MCP OpenShift server has been installed in namespace {{ include "mcp-openshift.namespace" . }}.
+
+MCP endpoint:
+{{- if .Values.route.enabled }}
+  https://<route-host>/mcp
+{{- else }}
+  http://{{ include "mcp-openshift.fullname" . }}.{{ include "mcp-openshift.namespace" . }}.svc.cluster.local:{{ .Values.service.port }}/mcp
+{{- end }}
+
+If auth.enabled=true, use:
+  Authorization: Bearer <token>

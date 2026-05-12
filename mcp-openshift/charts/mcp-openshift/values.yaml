@@ -1,0 +1,70 @@
+namespace:
+  create: true
+  name: mcp-server
+
+replicaCount: 1
+
+image:
+  repository: quay.io/fcalomen/mcp-openshift
+  tag: "0.2.2"
+  pullPolicy: Always
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+auth:
+  enabled: true
+  existingSecret: ""
+  secretName: ""
+  tokenKey: token
+  token: ""
+
+mcp:
+  allowedHosts:
+    - mcp-openshift-mcp-server.apps.sno.openocp.com
+    - mcp-openshift-mcp-server.apps.sno.openocp.com:*
+    - 127.0.0.1:*
+    - localhost:*
+  allowedOrigins:
+    - https://mcp-openshift-mcp-server.apps.sno.openocp.com
+    - https://mcp-openshift-mcp-server.apps.sno.openocp.com:*
+    - http://127.0.0.1:*
+    - http://localhost:*
+
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  port: 8000
+
+route:
+  enabled: true
+  host: ""
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -900,7 +900,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="OpenShift Kubernetes Operations Server",
-    version="0.2.1",
+    version="0.2.2",
     description=(
         "Production REST and MCP server for OpenShift/Kubernetes operational analysis. "
         "Use /api/v1 for REST and /mcp for MCP Streamable HTTP."

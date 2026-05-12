@@ -214,6 +214,30 @@ Add a remote Streamable HTTP server to your OpenClaw config:
 
 ## Container Deployment
 
+### Helm Deployment
+
+The Helm chart deploys the server to the `mcp-server` namespace by default:
+
+```bash
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+helm upgrade --install mcp-openshift ./charts/mcp-openshift \
+  --namespace mcp-server \
+  --create-namespace \
+  --set auth.token="$MCP_AUTH_TOKEN"
+```
+
+To reuse an existing Secret:
+
+```bash
+helm upgrade --install mcp-openshift ./charts/mcp-openshift \
+  --namespace mcp-server \
+  --create-namespace \
+  --set auth.existingSecret=mcp-openshift-auth
+```
+
+See `charts/mcp-openshift/README.md` for all chart values.
+
 ### Building the Image
 
 The project supports multi-arch builds (ARM64 and AMD64) using Podman:

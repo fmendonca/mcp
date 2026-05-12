@@ -44,7 +44,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | Value | Default | Description |
 | --- | --- | --- |
 | `namespace.name` | `mcp-server` | Namespace used by namespaced resources |
-| `namespace.create` | `true` | Create the namespace from the chart |
+| `namespace.create` | `false` | Create a Namespace object from the chart. Keep this `false` when using `--create-namespace` or an existing namespace |
 | `image.repository` | `quay.io/fcalomen/mcp-openshift` | Container image repository |
 | `image.tag` | `0.2.2` | Container image tag |
 | `auth.enabled` | `true` | Set `MCP_AUTH_TOKEN` in the deployment |

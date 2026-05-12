@@ -1,5 +1,5 @@
 namespace:
-  create: true
+  create: false
   name: mcp-server
 
 replicaCount: 1

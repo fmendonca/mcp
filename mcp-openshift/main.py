@@ -157,8 +157,7 @@ def api_error(error: ApiException, not_found_detail: str = "Resource not found")
         return HTTPException(status_code=403, detail="Forbidden by Kubernetes RBAC")
     if error.status == 401:
         return HTTPException(status_code=401, detail="Kubernetes authentication failed")
-    detail = error.reason or error.body or str(error)
-    return HTTPException(status_code=500, detail=detail)
+    return HTTPException(status_code=500, detail="Internal server error")
 
 
 def crd_not_available(resource_type: str) -> HTTPException:

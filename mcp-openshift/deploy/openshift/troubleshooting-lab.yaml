@@ -1,0 +1,241 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: mcp-troubleshooting-lab
+    app.kubernetes.io/part-of: mcp-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crashloop-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: crashloop-demo
+    scenario: crashloop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crashloop-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crashloop-demo
+        scenario: crashloop
+    spec:
+      containers:
+      - name: app
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "starting crashloop-demo"
+          echo "simulated fatal error: missing required CONFIG_URL"
+          exit 1
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imagepull-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: imagepull-demo
+    scenario: imagepull
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: imagepull-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: imagepull-demo
+        scenario: imagepull
+    spec:
+      containers:
+      - name: app
+        image: quay.io/fcalomen/this-image-does-not-exist:0.0.1
+        imagePullPolicy: Always
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readiness-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: readiness-demo
+    scenario: readiness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: readiness-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: readiness-demo
+        scenario: readiness
+    spec:
+      containers:
+      - name: app
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "readiness-demo running, but readiness probe points to a missing path"
+          python3 -m http.server 8080
+        ports:
+        - name: http
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resources-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: resources-demo
+    scenario: resources
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: resources-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: resources-demo
+        scenario: resources
+    spec:
+      containers:
+      - name: app
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "resources-demo has intentionally tiny memory limits"
+          sleep 3600
+        resources:
+          requests:
+            cpu: 5m
+            memory: 8Mi
+          limits:
+            cpu: 20m
+            memory: 16Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: failing-job-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: failing-job-demo
+    scenario: failing-job
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: failing-job-demo
+        scenario: failing-job
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: job
+        image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "simulated job failure: cannot connect to database"
+          exit 42
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: suspended-cronjob-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: suspended-cronjob-demo
+    scenario: suspended-cronjob
+spec:
+  schedule: "*/5 * * * *"
+  suspend: true
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: suspended-cronjob-demo
+            scenario: suspended-cronjob
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: cron
+            image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              echo "this cronjob is intentionally suspended"
+            resources:
+              requests:
+                cpu: 20m
+                memory: 32Mi
+              limits:
+                cpu: 100m
+                memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken-service-demo
+  namespace: mcp-troubleshooting-lab
+  labels:
+    app.kubernetes.io/name: broken-service-demo
+    scenario: service-selector
+spec:
+  selector:
+    app.kubernetes.io/name: does-not-match-any-pod
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http

@@ -6,33 +6,94 @@ metadata:
   labels:
     {{- include "mcp-openshift.labels" . | nindent 4 }}
 rules:
+  # Core: namespaces, nodes, pods, services, events, storage, config, quotas
   - apiGroups: [""]
-    resources: ["namespaces"]
+    resources: ["namespaces", "nodes", "persistentvolumes", "storageclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events", "services",
+                "persistentvolumeclaims", "configmaps", "serviceaccounts",
+                "resourcequotas", "limitranges"]
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "delete"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["events", "services"]
-    verbs: ["get", "list"]
+    verbs: ["delete"]
+  # Apps
   - apiGroups: ["apps"]
-    resources: ["deployments"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
     verbs: ["get", "list", "patch"]
+  # Storage
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
+  # Networking
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list"]
+  # Autoscaling
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
+  # Batch
   - apiGroups: ["batch"]
     resources: ["jobs", "cronjobs"]
     verbs: ["get", "list"]
+  # RBAC
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
     verbs: ["get", "list"]
+  # OpenShift Routes
   - apiGroups: ["route.openshift.io"]
     resources: ["routes"]
     verbs: ["get", "list"]
-  - apiGroups: ["kubevirt.io"]
-    resources: ["virtualmachines"]
+  # OpenShift Projects
+  - apiGroups: ["project.openshift.io"]
+    resources: ["projects"]
     verbs: ["get", "list"]
+  # OpenShift Apps (DeploymentConfigs)
+  - apiGroups: ["apps.openshift.io"]
+    resources: ["deploymentconfigs"]
+    verbs: ["get", "list", "patch", "update"]
+  # OpenShift Build
+  - apiGroups: ["build.openshift.io"]
+    resources: ["buildconfigs", "builds"]
+    verbs: ["get", "list"]
+  # OpenShift Image
+  - apiGroups: ["image.openshift.io"]
+    resources: ["imagestreams", "imagestreamtags"]
+    verbs: ["get", "list"]
+  # OpenShift User / Group
+  - apiGroups: ["user.openshift.io"]
+    resources: ["users", "groups"]
+    verbs: ["get", "list"]
+  # OpenShift Security
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    verbs: ["get", "list"]
+  # OpenShift Config
+  - apiGroups: ["config.openshift.io"]
+    resources: ["clusterversions", "clusteroperators", "infrastructures"]
+    verbs: ["get", "list"]
+  # Machine Config
+  - apiGroups: ["machineconfiguration.openshift.io"]
+    resources: ["machineconfigpools", "machineconfigs"]
+    verbs: ["get", "list"]
+  # Machine API
+  - apiGroups: ["machine.openshift.io"]
+    resources: ["machines", "machinesets"]
+    verbs: ["get", "list"]
+  # OLM
+  - apiGroups: ["operators.coreos.com"]
+    resources: ["subscriptions", "clusterserviceversions", "catalogsources", "installplans"]
+    verbs: ["get", "list"]
+  # KubeVirt VMs and VMIs (read)
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachines", "virtualmachineinstances"]
+    verbs: ["get", "list"]
+  # KubeVirt VM power actions (start/stop/restart via subresource)
+  - apiGroups: ["subresources.kubevirt.io"]
+    resources: ["virtualmachines/start", "virtualmachines/stop", "virtualmachines/restart"]
+    verbs: ["update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

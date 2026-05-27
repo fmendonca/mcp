@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 
 # --- OpenShift / KubeVirt API group constants ---
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"

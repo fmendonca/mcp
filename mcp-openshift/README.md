@@ -2,8 +2,8 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.3.0  
-**Image:** `quay.io/fcalomen/mcp:openshift-0.3.0`
+**Version:** 0.3.1  
+**Image:** `quay.io/fcalomen/mcp:openshift-0.3.1`
 
 ## Features
 

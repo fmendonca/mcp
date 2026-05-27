@@ -5,8 +5,8 @@ namespace:
 replicaCount: 1
 
 image:
-  repository: quay.io/fcalomen/mcp-openshift
-  tag: "0.2.2"
+  repository: quay.io/fcalomen/mcp
+  tag: "openshift-0.3.0"
   pullPolicy: Always
 
 nameOverride: ""

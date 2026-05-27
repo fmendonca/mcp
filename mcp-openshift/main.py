@@ -1621,6 +1621,122 @@ def _vm_power_action(namespace: str, vm_name: str, action: str) -> Dict[str, Any
     return {"status": f"vm_{action}_requested", "name": vm_name, "namespace": namespace}
 
 
+def clone_virtualmachine_data(namespace: str, vm_name: str, new_vm_name: str) -> Dict[str, Any]:
+    try:
+        vm = get_virtualmachine_data(namespace, vm_name)
+        vm_obj = custom_objects.get_namespaced_custom_object(
+            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VM_PLURAL, validated_name(vm_name)
+        )
+        spec = vm_obj.get("spec", {})
+        new_spec = {"metadata": {"name": validated_name(new_vm_name)}, "spec": spec}
+        result = custom_objects.create_namespaced_custom_object(
+            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VM_PLURAL, new_spec
+        )
+        return {
+            "status": "clone_requested",
+            "source_vm": vm_name,
+            "cloned_vm": new_vm_name,
+            "namespace": namespace,
+        }
+    except ApiException as e:
+        raise api_error(e, "VirtualMachine not found or clone failed")
+
+
+def pause_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
+    return _vm_power_action(namespace, vm_name, "pause")
+
+
+def unpause_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
+    return _vm_power_action(namespace, vm_name, "unpause")
+
+
+def force_reboot_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
+    path = f"/apis/subresources.kubevirt.io/v1/namespaces/{validated_name(namespace)}/virtualmachines/{validated_name(vm_name)}/reboot"
+    body = {"force": True}
+    try:
+        custom_objects.api_client.call_api(
+            path, "PUT",
+            header_params={"Content-Type": "application/json"},
+            body=body,
+            response_types_map={200: "object", 202: "object", 204: "object"},
+            auth_settings=["BearerToken"],
+            _return_http_data_only=True,
+            _preload_content=False,
+        )
+    except ApiException as e:
+        raise api_error(e, "VirtualMachine not found")
+    return {"status": "force_reboot_requested", "name": vm_name, "namespace": namespace}
+
+
+def list_vm_snapshots_data(namespace: str) -> Dict[str, Any]:
+    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, "virtualmachinesnapshots", lambda s: s, "VirtualMachineSnapshotList")
+
+
+def create_vm_snapshot_data(namespace: str, vm_name: str, snapshot_name: str) -> Dict[str, Any]:
+    try:
+        snapshot_obj = {
+            "apiVersion": f"{KUBEVIRT_GROUP}/{KUBEVIRT_VERSION}",
+            "kind": "VirtualMachineSnapshot",
+            "metadata": {"name": validated_name(snapshot_name)},
+            "spec": {"source": {"name": validated_name(vm_name), "kind": "VirtualMachine"}},
+        }
+        result = custom_objects.create_namespaced_custom_object(
+            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), "virtualmachinesnapshots", snapshot_obj
+        )
+        return {
+            "status": "snapshot_requested",
+            "snapshot_name": snapshot_name,
+            "vm_name": vm_name,
+            "namespace": namespace,
+        }
+    except ApiException as e:
+        raise api_error(e, "Could not create snapshot")
+
+
+def delete_vm_snapshot_data(namespace: str, snapshot_name: str) -> Dict[str, Any]:
+    try:
+        custom_objects.delete_namespaced_custom_object(
+            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), "virtualmachinesnapshots", validated_name(snapshot_name)
+        )
+        return {
+            "status": "snapshot_deleted",
+            "snapshot_name": snapshot_name,
+            "namespace": namespace,
+        }
+    except ApiException as e:
+        raise api_error(e, "Snapshot not found")
+
+
+def list_data_volumes_data(namespace: str) -> Dict[str, Any]:
+    return _list_namespaced("cdi.kubevirt.io", "v1beta1", namespace, "datavolumes", lambda d: d, "DataVolumeList")
+
+
+def get_data_volume_data(namespace: str, dv_name: str) -> Dict[str, Any]:
+    return _get_namespaced("cdi.kubevirt.io", "v1beta1", namespace, "datavolumes", dv_name, lambda d: d, "DataVolume not found")
+
+
+def get_vm_console_data(namespace: str, vm_name: str) -> Dict[str, Any]:
+    try:
+        vmi = custom_objects.get_namespaced_custom_object(
+            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VMI_PLURAL, validated_name(vm_name)
+        )
+        status = vmi.get("status", {})
+        graphics = status.get("graphics", [])
+        return {
+            "vm_name": vm_name,
+            "namespace": namespace,
+            "console_available": len(graphics) > 0,
+            "graphics": graphics,
+            "access_credentials": status.get("accessCredentials"),
+        }
+    except ApiException as e:
+        raise api_error(e, "VirtualMachineInstance not found or no console available")
+
+
+def list_vm_restores_data(namespace: str) -> Dict[str, Any]:
+    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, "virtualmachinerestores", lambda r: r, "VirtualMachineRestoreList")
+
+
 # ============================================================
 # MCP server
 # ============================================================
@@ -2112,6 +2228,61 @@ def restart_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Restart a KubeVirt VirtualMachine."""
     return _vm_power_action(namespace, vm_name, "restart")
 
+@mcp.tool()
+def pause_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
+    """Pause a running KubeVirt VirtualMachine (different from stop — memory stays in VM)."""
+    return pause_virtualmachine_data(namespace, vm_name)
+
+@mcp.tool()
+def unpause_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
+    """Resume a paused KubeVirt VirtualMachine."""
+    return unpause_virtualmachine_data(namespace, vm_name)
+
+@mcp.tool()
+def force_reboot_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
+    """Force an immediate reboot of a KubeVirt VirtualMachine without graceful shutdown."""
+    return force_reboot_virtualmachine_data(namespace, vm_name)
+
+@mcp.tool()
+def clone_virtual_machine(namespace: str, vm_name: str, new_vm_name: str) -> Dict[str, Any]:
+    """Clone a KubeVirt VirtualMachine to a new VM with the same spec."""
+    return clone_virtualmachine_data(namespace, vm_name, new_vm_name)
+
+@mcp.tool()
+def list_vm_snapshots(namespace: str) -> Dict[str, Any]:
+    """List VirtualMachineSnapshots in a namespace."""
+    return list_vm_snapshots_data(namespace)
+
+@mcp.tool()
+def create_vm_snapshot(namespace: str, vm_name: str, snapshot_name: str) -> Dict[str, Any]:
+    """Create a snapshot of a KubeVirt VirtualMachine."""
+    return create_vm_snapshot_data(namespace, vm_name, snapshot_name)
+
+@mcp.tool()
+def delete_vm_snapshot(namespace: str, snapshot_name: str) -> Dict[str, Any]:
+    """Delete a VirtualMachineSnapshot."""
+    return delete_vm_snapshot_data(namespace, snapshot_name)
+
+@mcp.tool()
+def list_data_volumes(namespace: str) -> Dict[str, Any]:
+    """List DataVolumes (CDI) in a namespace — storage for VMs."""
+    return list_data_volumes_data(namespace)
+
+@mcp.tool()
+def get_data_volume(namespace: str, data_volume_name: str) -> Dict[str, Any]:
+    """Get one DataVolume with import/upload progress and phase."""
+    return get_data_volume_data(namespace, data_volume_name)
+
+@mcp.tool()
+def get_vm_console(namespace: str, vm_name: str) -> Dict[str, Any]:
+    """Get VirtualMachineInstance console access info (VNC/SPICE endpoints and credentials)."""
+    return get_vm_console_data(namespace, vm_name)
+
+@mcp.tool()
+def list_vm_restores(namespace: str) -> Dict[str, Any]:
+    """List VirtualMachineRestores in a namespace (restore from snapshots)."""
+    return list_vm_restores_data(namespace)
+
 
 # ============================================================
 # FastAPI app
@@ -2572,6 +2743,55 @@ def rest_stop_vm(namespace: str, vm_name: str):
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/restart")
 def rest_restart_vm(namespace: str, vm_name: str):
     return _vm_power_action(namespace, vm_name, "restart")
+
+@app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/pause")
+def rest_pause_vm(namespace: str, vm_name: str):
+    return pause_virtualmachine_data(namespace, vm_name)
+
+@app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/unpause")
+def rest_unpause_vm(namespace: str, vm_name: str):
+    return unpause_virtualmachine_data(namespace, vm_name)
+
+@app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/reboot")
+def rest_force_reboot_vm(namespace: str, vm_name: str):
+    return force_reboot_virtualmachine_data(namespace, vm_name)
+
+@app.post("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/clone")
+def rest_clone_vm(namespace: str, vm_name: str, body: Dict[str, str] = Body(...)):
+    new_vm_name = body.get("new_vm_name", f"{vm_name}-clone")
+    return clone_virtualmachine_data(namespace, vm_name, new_vm_name)
+
+@app.get("/api/v1/namespaces/{namespace}/virtualmachinesnapshots")
+def rest_list_vm_snapshots(namespace: str):
+    return list_vm_snapshots_data(namespace)
+
+@app.post("/api/v1/namespaces/{namespace}/virtualmachinesnapshots")
+def rest_create_vm_snapshot(namespace: str, body: Dict[str, str] = Body(...)):
+    vm_name = body.get("vm_name")
+    snapshot_name = body.get("snapshot_name")
+    if not vm_name or not snapshot_name:
+        raise HTTPException(status_code=400, detail="vm_name and snapshot_name required")
+    return create_vm_snapshot_data(namespace, vm_name, snapshot_name)
+
+@app.delete("/api/v1/namespaces/{namespace}/virtualmachinesnapshots/{snapshot_name}")
+def rest_delete_vm_snapshot(namespace: str, snapshot_name: str):
+    return delete_vm_snapshot_data(namespace, snapshot_name)
+
+@app.get("/api/v1/namespaces/{namespace}/datavolumes")
+def rest_list_data_volumes(namespace: str):
+    return list_data_volumes_data(namespace)
+
+@app.get("/api/v1/namespaces/{namespace}/datavolumes/{dv_name}")
+def rest_get_data_volume(namespace: str, dv_name: str):
+    return get_data_volume_data(namespace, dv_name)
+
+@app.get("/api/v1/namespaces/{namespace}/virtualmachineinstances/{vmi_name}/console")
+def rest_get_vm_console(namespace: str, vmi_name: str):
+    return get_vm_console_data(namespace, vmi_name)
+
+@app.get("/api/v1/namespaces/{namespace}/virtualmachinerestores")
+def rest_list_vm_restores(namespace: str):
+    return list_vm_restores_data(namespace)
 
 
 if __name__ == "__main__":

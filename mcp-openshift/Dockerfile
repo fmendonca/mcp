@@ -1,6 +1,7 @@
 FROM alpine:3.21
 
 RUN apk add --no-cache python3 py3-pip && \
+    pip3 install --no-cache-dir --break-system-packages --upgrade 'pip>=26.1' 'setuptools>=78.1.1' && \
     adduser -D -u 1001 -g mcpuser mcpuser
 
 WORKDIR /app

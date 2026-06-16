@@ -1,9 +1,10 @@
 """Tests for REST API endpoints."""
 
-import pytest
-from unittest.mock import patch, MagicMock
-import sys
 import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -93,4 +94,6 @@ class TestErrorResponses:
             data = response.json()
             detail = data.get("detail", "")
             # Should not contain Kubernetes-specific error details
-            assert "kubernetes" not in detail.lower() or "not available" in detail.lower()
+            assert (
+                "kubernetes" not in detail.lower() or "not available" in detail.lower()
+            )

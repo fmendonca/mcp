@@ -1,9 +1,10 @@
 """Tests for input validation functions."""
 
+import os
+import sys
+
 import pytest
 from fastapi import HTTPException
-import sys
-import os
 
 # Add parent directory to path to import main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

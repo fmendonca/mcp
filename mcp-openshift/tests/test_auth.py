@@ -1,9 +1,10 @@
 """Tests for authentication and authorization."""
 
-import pytest
-from unittest.mock import patch
 import os
 import sys
+from unittest.mock import patch
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -13,7 +14,10 @@ class TestAuthentication:
 
     def test_bearer_token_authentication(self, client, auth_headers):
         """Test Bearer token authentication."""
-        with patch.dict(os.environ, {"MCP_AUTH_TOKEN": "test-token-12345678901234567890123456789012"}):
+        with patch.dict(
+            os.environ,
+            {"MCP_AUTH_TOKEN": "test-token-12345678901234567890123456789012"},
+        ):
             # This test validates that the endpoint is protected
             # Actual test would require re-importing main module with new env var
             pass
@@ -64,8 +68,14 @@ class TestAuthorizationHeaders:
     def test_security_headers_present(self, client):
         """Test that security headers are set in responses."""
         response = client.get("/")
-        assert "x-content-type-options" in response.headers or "X-Content-Type-Options" in response.headers
-        assert "x-frame-options" in response.headers or "X-Frame-Options" in response.headers
+        assert (
+            "x-content-type-options" in response.headers
+            or "X-Content-Type-Options" in response.headers
+        )
+        assert (
+            "x-frame-options" in response.headers
+            or "X-Frame-Options" in response.headers
+        )
 
     def test_www_authenticate_header_on_401(self, client):
         """Test that 401 responses include WWW-Authenticate header."""
@@ -73,4 +83,7 @@ class TestAuthorizationHeaders:
         response = client.get("/api/v1/namespaces", headers=headers)
         # If auth is enabled and token is invalid
         if response.status_code == 401:
-            assert "www-authenticate" in response.headers or "WWW-Authenticate" in response.headers
+            assert (
+                "www-authenticate" in response.headers
+                or "WWW-Authenticate" in response.headers
+            )

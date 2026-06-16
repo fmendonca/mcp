@@ -1,0 +1,154 @@
+name: Build and Push Container Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+    paths:
+      - 'mcp-openshift/**'
+      - '.github/workflows/build-and-push.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (format: X.Y.Z)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: quay.io
+  IMAGE_NAME: fcalomen/mcp:openshift
+
+jobs:
+  validate:
+    name: Validate Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${{ github.ref }}"
+            VERSION="${VERSION#refs/tags/v}"
+          fi
+
+          # Validate version format (X.Y.Z)
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid VERSION format: $VERSION (use X.Y.Z)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "✓ Version validated: $VERSION"
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: mcp-openshift
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        working-directory: mcp-openshift
+        run: pytest tests/ -v --tb=short
+
+      - name: Run security checks
+        working-directory: mcp-openshift
+        run: |
+          bandit -r . -ll -x tests/
+          pip-audit --skip-editable
+
+      - name: Lint with flake8
+        working-directory: mcp-openshift
+        continue-on-error: true
+        run: |
+          flake8 main.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 main.py --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  lint-helm:
+    name: Lint Helm Chart
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Lint Helm chart
+        working-directory: mcp-openshift
+        run: helm lint charts/mcp-openshift/
+
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    needs: [validate, test, lint-helm]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Log in to Container Registry
+        run: |
+          podman login -u ${{ secrets.QUAY_USERNAME }} \
+                       -p ${{ secrets.QUAY_PASSWORD }} \
+                       ${{ env.REGISTRY }}
+
+      - name: Build and push images
+        working-directory: mcp-openshift
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          echo "Building version: $VERSION"
+          ./build.sh
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          body: |
+            ## Container Images
+            - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}`
+            - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}-arm64`
+            - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}-amd64`
+
+            ## Helm Chart
+            ```bash
+            helm install mcp-openshift ./charts/mcp-openshift \
+              --set image.tag="openshift-${{ needs.validate.outputs.version }}"
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Success
+        run: |
+          echo "✅ Build successful!"
+          echo "📦 Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ needs.validate.outputs.version }}"
+          echo "🔗 Registry: https://quay.io/repository/fcalomen/mcp"

@@ -1,0 +1,28 @@
+# hadolint ignore=DL3006
+FROM registry.access.redhat.com/ubi9/python-312
+
+WORKDIR /opt/app-root/src
+
+COPY requirements.txt .
+
+RUN pip3 install --no-cache-dir --upgrade \
+        'pip>=26.1' \
+        'setuptools>=78.1.1' && \
+    pip3 install --no-cache-dir -r requirements.txt
+
+COPY main.py .
+
+# ubi9/python-312 already uses UID 1001 (default non-root user)
+USER 1001
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python3 -c "import sys; import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3); sys.exit(0)" || exit 1
+
+LABEL org.opencontainers.image.source="https://github.com/fmendonca/mcp" \
+      org.opencontainers.image.title="mcp-openshift" \
+      org.opencontainers.image.description="OpenShift Admin MCP Server — UBI9 variant" \
+      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/python-312"
+
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

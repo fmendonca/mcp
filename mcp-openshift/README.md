@@ -2,8 +2,34 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.3.0  
-**Image:** `quay.io/fcalomen/mcp:openshift-0.3.0`
+**Version:** 0.0.3+  
+**UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`  
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.3.1`
+
+[![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
+[![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
+
+---
+
+## Container images
+
+| Variant | Base | Registry | When to use |
+|---|---|---|---|
+| **UBI9** (recommended) | `ubi9/python-312` | `ghcr.io/fmendonca/mcp-openshift` | OpenShift, FIPS environments, enterprise |
+| Alpine | `alpine:3.21` | `quay.io/fcalomen/mcp` | Minimal footprint, local dev |
+
+```bash
+# UBI9 — latest release (auto-updated on every merge to main)
+docker pull ghcr.io/fmendonca/mcp-openshift:latest
+
+# UBI9 — pin to a specific version
+docker pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
+
+# Alpine
+docker pull quay.io/fcalomen/mcp:openshift-0.3.1
+```
+
+---
 
 ## Features
 
@@ -70,11 +96,13 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 | VirtualMachines | list, get, start, stop, restart |
 | VirtualMachineInstances | list, get |
 
+---
+
 ## Authentication
 
 ### Client authentication (MCP / REST)
 
-Set `MCP_AUTH_TOKEN` to protect all operational endpoints.
+Set `MCP_AUTH_TOKEN` to protect all operational endpoints:
 
 ```bash
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
@@ -93,16 +121,34 @@ The server automatically uses:
 1. **In-cluster**: service account token when running inside a pod
 2. **Local dev**: `~/.kube/config`
 
+---
+
 ## Quick Start
 
+### Run with Docker / Podman
+
 ```bash
-# Install dependencies
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+docker run -d \
+  --name mcp-openshift \
+  -e MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
+  -e KUBECONFIG=/kube/config \
+  -v ~/.kube:/kube:ro \
+  -p 8000:8000 \
+  ghcr.io/fmendonca/mcp-openshift:latest
+```
+
+### Run locally (development)
+
+```bash
+cd mcp-openshift
 pip install -r requirements.txt
 
-# Run locally (no auth — dev only)
+# Without auth (dev only)
 uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Run with authentication
+# With auth
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
@@ -112,19 +158,29 @@ Endpoints:
 - MCP: http://localhost:8000/mcp
 - REST: http://localhost:8000/api/v1
 
-## Build (multi-arch)
+---
+
+## Build images locally
+
+### UBI9 (requires Docker or Podman with buildx)
 
 ```bash
 cd mcp-openshift
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.ubi9 \
+  -t ghcr.io/fmendonca/mcp-openshift:dev \
+  --push .
+```
 
-# Build and push arm64 + amd64 to quay.io/fcalomen/mcp:openshift-0.3.0
-VERSION=0.3.0 ./build.sh
+### Alpine (multi-arch via Podman)
 
-# Override version
+```bash
+cd mcp-openshift
 VERSION=0.3.1 ./build.sh
 ```
 
-The script uses Podman to build both platforms and creates a multi-arch manifest.
+---
 
 ## Deploy to OpenShift
 
@@ -136,7 +192,9 @@ export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 helm upgrade --install mcp-openshift ./charts/mcp-openshift \
   --namespace mcp-server \
   --create-namespace \
-  --set auth.token="$MCP_AUTH_TOKEN"
+  --set auth.token="$MCP_AUTH_TOKEN" \
+  --set image.repository=ghcr.io/fmendonca/mcp-openshift \
+  --set image.tag=latest
 ```
 
 See [charts/mcp-openshift/README.md](charts/mcp-openshift/README.md) for all values.
@@ -144,20 +202,18 @@ See [charts/mcp-openshift/README.md](charts/mcp-openshift/README.md) for all val
 ### Raw manifests
 
 ```bash
-# Generate a real token first
 TOKEN="$(openssl rand -hex 32)"
 
-# Apply all resources
 oc apply -f deploy/openshift/mcp-server.yaml
 
-# Patch the token secret
 oc -n mcp-server patch secret mcp-openshift-auth \
   --type merge \
   -p "{\"stringData\":{\"token\":\"${TOKEN}\"}}"
 
-# Restart to pick up the new token
 oc -n mcp-server rollout restart deployment/mcp-openshift
 ```
+
+---
 
 ## MCP Client Configuration
 
@@ -165,7 +221,7 @@ oc -n mcp-server rollout restart deployment/mcp-openshift
 
 ```bash
 claude mcp add --transport http openshift \
-  https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp \
+  https://<your-route>/mcp \
   --header "Authorization: Bearer $MCP_AUTH_TOKEN"
 ```
 
@@ -176,7 +232,7 @@ Or add to `.mcp.json`:
   "mcpServers": {
     "openshift": {
       "type": "http",
-      "url": "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp",
+      "url": "https://<your-route>/mcp",
       "headers": {
         "Authorization": "Bearer ${MCP_AUTH_TOKEN}"
       }
@@ -195,7 +251,7 @@ Or add to `.mcp.json`:
   "servers": {
     "openshift": {
       "type": "http",
-      "url": "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp",
+      "url": "https://<your-route>/mcp",
       "headers": { "Authorization": "Bearer ${input:ocp-token}" }
     }
   }
@@ -206,25 +262,26 @@ Or add to `.mcp.json`:
 
 ```bash
 codex mcp add openshift \
-  --url https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp \
+  --url https://<your-route>/mcp \
   --bearer-token-env-var MCP_AUTH_TOKEN
 ```
 
-Or in `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.openshift]
-url = "https://mcp-openshift-mcp-server.apps.sno.openocp.com/mcp"
-bearer_token_env_var = "MCP_AUTH_TOKEN"
-```
+---
 
 ## Security
 
-- **Auth token**: never commit; always rotate via `openssl rand -hex 32`
-- **Container**: runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem
-- **Input validation**: resource names are validated before reaching the Kubernetes API
-- **Secrets**: the server never exposes Kubernetes Secret values — only metadata
-- **RBAC**: principle of least privilege — only `get`/`list` on sensitive resources, `delete` only on pods, `patch` on workloads for restart/scale
+| Control | Details |
+|---|---|
+| Auth token | Never committed; always rotate via `openssl rand -hex 32` |
+| Container | Runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem |
+| Input validation | Resource names validated with regex before reaching the Kubernetes API |
+| Secret exposure | Server never exposes Kubernetes Secret values — only metadata |
+| RBAC | Principle of least privilege — `get`/`list` on sensitive resources, `delete` only on pods, `patch` on workloads for restart/scale |
+| Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` on every response |
+| Error messages | Kubernetes internals never leaked in error responses |
+| CVE scanning | `pip-audit` and `bandit` run on every CI push |
+
+---
 
 ## Environment Variables
 
@@ -233,6 +290,8 @@ bearer_token_env_var = "MCP_AUTH_TOKEN"
 | `MCP_AUTH_TOKEN` | Bearer token for client authentication | unset (auth disabled) |
 | `MCP_ALLOWED_HOSTS` | Comma-separated allowed Host headers | `127.0.0.1:*,localhost:*,[::1]:*` |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed CORS origins | `http://127.0.0.1:*,http://localhost:*` |
+
+---
 
 ## REST API Reference
 
@@ -302,6 +361,8 @@ PUT  /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/restart
 GET  /api/v1/namespaces/{namespace}/virtualmachineinstances[/{vmi_name}]
 ```
 
+---
+
 ## Error Responses
 
 | HTTP | Meaning |
@@ -311,6 +372,9 @@ GET  /api/v1/namespaces/{namespace}/virtualmachineinstances[/{vmi_name}]
 | 403 | Kubernetes RBAC denied the operation |
 | 404 | Resource or CRD not found |
 | 500 | Kubernetes API error |
+| 503 | Kubernetes cluster not reachable |
+
+---
 
 ## License
 

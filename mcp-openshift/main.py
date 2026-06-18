@@ -13,8 +13,9 @@ from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 
 # --- OpenShift / KubeVirt API group constants ---
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"
@@ -127,17 +128,26 @@ class ScaleRequest(BaseModel):
 
 
 # --- Kubernetes client setup ---
-def configure_kubernetes() -> None:
+def configure_kubernetes() -> bool:
     try:
         config.load_incluster_config()
+        return True
     except config.ConfigException:
         try:
             config.load_kube_config()
+            return True
         except config.ConfigException:
-            raise RuntimeError("Could not configure kubernetes client")
+            return False
 
 
-configure_kubernetes()
+K8S_AVAILABLE = configure_kubernetes()
+if not K8S_AVAILABLE:
+    import logging as _logging
+
+    _logging.warning(
+        "Could not configure Kubernetes client - API calls will fail until a valid "
+        "kubeconfig or in-cluster config is available"
+    )
 
 core_v1 = client.CoreV1Api()
 apps_v1 = client.AppsV1Api()
@@ -150,15 +160,16 @@ custom_objects = client.CustomObjectsApi()
 
 
 # --- Error helpers ---
-def api_error(error: ApiException, not_found_detail: str = "Resource not found") -> HTTPException:
+def api_error(
+    error: ApiException, not_found_detail: str = "Resource not found"
+) -> HTTPException:
     if error.status == 404:
         return HTTPException(status_code=404, detail=not_found_detail)
     if error.status == 403:
         return HTTPException(status_code=403, detail="Forbidden by Kubernetes RBAC")
     if error.status == 401:
         return HTTPException(status_code=401, detail="Kubernetes authentication failed")
-    detail = error.reason or error.body or str(error)
-    return HTTPException(status_code=500, detail=detail)
+    return HTTPException(status_code=500, detail="Internal server error")
 
 
 def crd_not_available(resource_type: str) -> HTTPException:
@@ -181,9 +192,11 @@ def object_metadata(obj: Any) -> Dict[str, Any]:
         "resource_version": obj.metadata.resource_version,
         "labels": obj.metadata.labels or {},
         "annotations": obj.metadata.annotations or {},
-        "created_at": obj.metadata.creation_timestamp.isoformat()
-        if obj.metadata.creation_timestamp
-        else None,
+        "created_at": (
+            obj.metadata.creation_timestamp.isoformat()
+            if obj.metadata.creation_timestamp
+            else None
+        ),
     }
 
 
@@ -211,7 +224,9 @@ def summarize_container(container: Any, status: Optional[Any] = None) -> Dict[st
                 "image_id": status.image_id,
                 "container_id": status.container_id,
                 "state": status.state.to_dict() if status.state else None,
-                "last_state": status.last_state.to_dict() if status.last_state else None,
+                "last_state": (
+                    status.last_state.to_dict() if status.last_state else None
+                ),
             }
         )
     return data
@@ -228,9 +243,7 @@ def summarize_namespace(namespace: Any) -> Dict[str, Any]:
 def summarize_node(node: Any) -> Dict[str, Any]:
     labels = node.metadata.labels or {}
     roles = [
-        k.split("/", 1)[1]
-        for k in labels
-        if k.startswith("node-role.kubernetes.io/")
+        k.split("/", 1)[1] for k in labels if k.startswith("node-role.kubernetes.io/")
     ] or ["worker"]
     ni = node.status.node_info
     conditions = {c.type: c.status for c in (node.status.conditions or [])}
@@ -359,10 +372,14 @@ def summarize_deployment(deployment: Any) -> Dict[str, Any]:
         "ready_replicas": deployment.status.ready_replicas or 0,
         "available_replicas": available,
         "updated_replicas": updated,
-        "rollout_complete": observed >= generation and updated == desired and available == desired,
+        "rollout_complete": observed >= generation
+        and updated == desired
+        and available == desired,
         "observed_generation": observed,
         "generation": generation,
-        "strategy": deployment.spec.strategy.to_dict() if deployment.spec.strategy else None,
+        "strategy": (
+            deployment.spec.strategy.to_dict() if deployment.spec.strategy else None
+        ),
         "containers": [
             summarize_container(c)
             for c in (deployment.spec.template.spec.containers or [])
@@ -379,10 +396,11 @@ def summarize_statefulset(ss: Any) -> Dict[str, Any]:
         "current_replicas": ss.status.current_replicas or 0,
         "updated_replicas": ss.status.updated_replicas or 0,
         "service_name": ss.spec.service_name,
-        "update_strategy": ss.spec.update_strategy.to_dict() if ss.spec.update_strategy else None,
+        "update_strategy": (
+            ss.spec.update_strategy.to_dict() if ss.spec.update_strategy else None
+        ),
         "containers": [
-            summarize_container(c)
-            for c in (ss.spec.template.spec.containers or [])
+            summarize_container(c) for c in (ss.spec.template.spec.containers or [])
         ],
         "conditions": [c.to_dict() for c in (ss.status.conditions or [])],
     }
@@ -396,10 +414,11 @@ def summarize_daemonset(ds: Any) -> Dict[str, Any]:
         "number_available": ds.status.number_available or 0,
         "number_unavailable": ds.status.number_unavailable or 0,
         "updated_number_scheduled": ds.status.updated_number_scheduled or 0,
-        "update_strategy": ds.spec.update_strategy.to_dict() if ds.spec.update_strategy else None,
+        "update_strategy": (
+            ds.spec.update_strategy.to_dict() if ds.spec.update_strategy else None
+        ),
         "containers": [
-            summarize_container(c)
-            for c in (ds.spec.template.spec.containers or [])
+            summarize_container(c) for c in (ds.spec.template.spec.containers or [])
         ],
         "conditions": [c.to_dict() for c in (ds.status.conditions or [])],
     }
@@ -413,8 +432,7 @@ def summarize_replicaset(rs: Any) -> Dict[str, Any]:
         "available_replicas": rs.status.available_replicas or 0,
         "owner_references": [r.to_dict() for r in (rs.metadata.owner_references or [])],
         "containers": [
-            summarize_container(c)
-            for c in (rs.spec.template.spec.containers or [])
+            summarize_container(c) for c in (rs.spec.template.spec.containers or [])
         ],
         "conditions": [c.to_dict() for c in (rs.status.conditions or [])],
     }
@@ -427,9 +445,9 @@ def summarize_hpa(hpa: Any) -> Dict[str, Any]:
         "max_replicas": hpa.spec.max_replicas,
         "current_replicas": hpa.status.current_replicas or 0,
         "desired_replicas": hpa.status.desired_replicas or 0,
-        "scale_target_ref": hpa.spec.scale_target_ref.to_dict()
-        if hpa.spec.scale_target_ref
-        else None,
+        "scale_target_ref": (
+            hpa.spec.scale_target_ref.to_dict() if hpa.spec.scale_target_ref else None
+        ),
         "metrics": [m.to_dict() for m in (hpa.spec.metrics or [])],
         "current_metrics": [m.to_dict() for m in (hpa.status.current_metrics or [])],
         "conditions": [c.to_dict() for c in (hpa.status.conditions or [])],
@@ -452,9 +470,9 @@ def summarize_ingress(ingress: Any) -> Dict[str, Any]:
 def summarize_network_policy(np: Any) -> Dict[str, Any]:
     return {
         **object_metadata(np),
-        "pod_selector": np.spec.pod_selector.to_dict()
-        if np.spec.pod_selector
-        else None,
+        "pod_selector": (
+            np.spec.pod_selector.to_dict() if np.spec.pod_selector else None
+        ),
         "ingress": [r.to_dict() for r in (np.spec.ingress or [])],
         "egress": [r.to_dict() for r in (np.spec.egress or [])],
         "policy_types": np.spec.policy_types or [],
@@ -469,10 +487,14 @@ def summarize_job(job: Any) -> Dict[str, Any]:
         "active": job.status.active or 0,
         "succeeded": job.status.succeeded or 0,
         "failed": job.status.failed or 0,
-        "start_time": job.status.start_time.isoformat() if job.status.start_time else None,
-        "completion_time": job.status.completion_time.isoformat()
-        if job.status.completion_time
-        else None,
+        "start_time": (
+            job.status.start_time.isoformat() if job.status.start_time else None
+        ),
+        "completion_time": (
+            job.status.completion_time.isoformat()
+            if job.status.completion_time
+            else None
+        ),
         "conditions": [c.to_dict() for c in (job.status.conditions or [])],
     }
 
@@ -486,12 +508,16 @@ def summarize_cronjob(cronjob: Any) -> Dict[str, Any]:
             {"name": ref.name, "namespace": ref.namespace}
             for ref in (cronjob.status.active or [])
         ],
-        "last_schedule_time": cronjob.status.last_schedule_time.isoformat()
-        if cronjob.status.last_schedule_time
-        else None,
-        "last_successful_time": cronjob.status.last_successful_time.isoformat()
-        if cronjob.status.last_successful_time
-        else None,
+        "last_schedule_time": (
+            cronjob.status.last_schedule_time.isoformat()
+            if cronjob.status.last_schedule_time
+            else None
+        ),
+        "last_successful_time": (
+            cronjob.status.last_successful_time.isoformat()
+            if cronjob.status.last_successful_time
+            else None
+        ),
     }
 
 
@@ -514,9 +540,9 @@ def summarize_event(event: Any) -> Dict[str, Any]:
         "reason": event.reason,
         "message": event.message,
         "count": event.count,
-        "involved_object": event.involved_object.to_dict()
-        if event.involved_object
-        else None,
+        "involved_object": (
+            event.involved_object.to_dict() if event.involved_object else None
+        ),
         "event_time": event_time.isoformat() if event_time else None,
     }
 
@@ -587,7 +613,11 @@ def summarize_deployment_config(dc: Dict[str, Any]) -> Dict[str, Any]:
         "observed_generation": status.get("observedGeneration"),
         "strategy": spec.get("strategy", {}).get("type"),
         "containers": [
-            {"name": c.get("name"), "image": c.get("image"), "resources": c.get("resources", {})}
+            {
+                "name": c.get("name"),
+                "image": c.get("image"),
+                "resources": c.get("resources", {}),
+            }
             for c in containers
         ],
         "triggers": [t.get("type") for t in spec.get("triggers", [])],
@@ -686,7 +716,10 @@ def summarize_cluster_version(cv: Dict[str, Any]) -> Dict[str, Any]:
     spec = cv.get("spec", {})
     status = cv.get("status", {})
     history = status.get("history", [])
-    current = next((h for h in history if h.get("state") == "Completed"), history[0] if history else {})
+    current = next(
+        (h for h in history if h.get("state") == "Completed"),
+        history[0] if history else {},
+    )
     desired_update = spec.get("desiredUpdate")
     return {
         **_meta(cv),
@@ -698,7 +731,9 @@ def summarize_cluster_version(cv: Dict[str, Any]) -> Dict[str, Any]:
         "started_time": current.get("startedTime"),
         "completion_time": current.get("completionTime"),
         "desired_update": desired_update,
-        "available_updates": [u.get("version") for u in status.get("availableUpdates", [])],
+        "available_updates": [
+            u.get("version") for u in status.get("availableUpdates", [])
+        ],
         "conditions": status.get("conditions", []),
     }
 
@@ -707,7 +742,11 @@ def summarize_cluster_operator(co: Dict[str, Any]) -> Dict[str, Any]:
     status = co.get("status", {})
     conditions = {c.get("type"): c.get("status") for c in status.get("conditions", [])}
     operator_version = next(
-        (v.get("version") for v in status.get("versions", []) if v.get("name") == "operator"),
+        (
+            v.get("version")
+            for v in status.get("versions", [])
+            if v.get("name") == "operator"
+        ),
         None,
     )
     return {
@@ -748,7 +787,9 @@ def summarize_machine(machine: Dict[str, Any]) -> Dict[str, Any]:
     return {
         **_meta(machine),
         "phase": status.get("phase"),
-        "node_ref": status.get("nodeRef", {}).get("name") if status.get("nodeRef") else None,
+        "node_ref": (
+            status.get("nodeRef", {}).get("name") if status.get("nodeRef") else None
+        ),
         "provider_id": spec.get("providerID"),
         "ready": conditions.get("Ready") == "True",
         "conditions": status.get("conditions", []),
@@ -797,7 +838,11 @@ def summarize_csv(csv_obj: Dict[str, Any]) -> Dict[str, Any]:
         "phase": status.get("phase"),
         "reason": status.get("reason"),
         "conditions": [
-            {"type": c.get("type"), "status": c.get("status"), "message": (c.get("message") or "")[:200]}
+            {
+                "type": c.get("type"),
+                "status": c.get("status"),
+                "message": (c.get("message") or "")[:200],
+            }
             for c in status.get("conditions", [])
         ],
     }
@@ -816,7 +861,9 @@ def summarize_catalog_source(cs: Dict[str, Any]) -> Dict[str, Any]:
         "display_name": spec.get("displayName"),
         "publisher": spec.get("publisher"),
         "registry_poll_interval": poll_interval,
-        "last_observed_state": status.get("connectionState", {}).get("lastObservedState"),
+        "last_observed_state": status.get("connectionState", {}).get(
+            "lastObservedState"
+        ),
     }
 
 
@@ -862,7 +909,9 @@ def summarize_vmi(vmi: Dict[str, Any]) -> Dict[str, Any]:
 def list_namespaces_data() -> Dict[str, Any]:
     try:
         ns = core_v1.list_namespace()
-        return list_response([summarize_namespace(n) for n in ns.items], "NamespaceList")
+        return list_response(
+            [summarize_namespace(n) for n in ns.items], "NamespaceList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -889,9 +938,13 @@ def get_node_data(node_name: str) -> Dict[str, Any]:
         raise api_error(e, "Node not found")
 
 
-def list_pods_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_pods_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     try:
-        pods = core_v1.list_namespaced_pod(validated_name(namespace), label_selector=label_selector)
+        pods = core_v1.list_namespaced_pod(
+            validated_name(namespace), label_selector=label_selector
+        )
         return list_response([summarize_pod(p) for p in pods.items], "PodList")
     except ApiException as e:
         raise api_error(e)
@@ -899,17 +952,25 @@ def list_pods_data(namespace: str, label_selector: Optional[str] = None) -> Dict
 
 def get_pod_data(namespace: str, pod_name: str) -> Dict[str, Any]:
     try:
-        return summarize_pod(core_v1.read_namespaced_pod(validated_name(pod_name), validated_name(namespace)))
+        return summarize_pod(
+            core_v1.read_namespaced_pod(
+                validated_name(pod_name), validated_name(namespace)
+            )
+        )
     except ApiException as e:
         raise api_error(e, "Pod not found")
 
 
-def delete_pod_data(namespace: str, pod_name: str, options: Optional[DeleteOptions] = None) -> Dict[str, Any]:
+def delete_pod_data(
+    namespace: str, pod_name: str, options: Optional[DeleteOptions] = None
+) -> Dict[str, Any]:
     try:
         options = options or DeleteOptions()
         grace_period = 0 if options.force else options.grace_period_seconds
         body = client.V1DeleteOptions(grace_period_seconds=grace_period)
-        result = core_v1.delete_namespaced_pod(validated_name(pod_name), validated_name(namespace), body=body)
+        result = core_v1.delete_namespaced_pod(
+            validated_name(pod_name), validated_name(namespace), body=body
+        )
         return {
             "status": "delete_requested",
             "name": pod_name,
@@ -922,7 +983,9 @@ def delete_pod_data(namespace: str, pod_name: str, options: Optional[DeleteOptio
         raise api_error(e, "Pod not found")
 
 
-def get_pod_logs_data(namespace: str, pod_name: str, query: Optional[LogQuery] = None) -> Dict[str, Any]:
+def get_pod_logs_data(
+    namespace: str, pod_name: str, query: Optional[LogQuery] = None
+) -> Dict[str, Any]:
     try:
         query = query or LogQuery()
         logs = core_v1.read_namespaced_pod_log(
@@ -965,12 +1028,21 @@ def list_events_data(
         raise api_error(e)
 
 
-def list_containers_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_containers_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     pods = list_pods_data(namespace, label_selector=label_selector)["items"]
     containers = []
     for pod in pods:
         for container in pod["containers"]:
-            containers.append({"namespace": namespace, "pod": pod["name"], "pod_phase": pod["phase"], **container})
+            containers.append(
+                {
+                    "namespace": namespace,
+                    "pod": pod["name"],
+                    "pod_phase": pod["phase"],
+                    **container,
+                }
+            )
     return list_response(containers, "ContainerList")
 
 
@@ -984,7 +1056,11 @@ def list_services_data(namespace: str) -> Dict[str, Any]:
 
 def get_service_data(namespace: str, service_name: str) -> Dict[str, Any]:
     try:
-        return summarize_service(core_v1.read_namespaced_service(validated_name(service_name), validated_name(namespace)))
+        return summarize_service(
+            core_v1.read_namespaced_service(
+                validated_name(service_name), validated_name(namespace)
+            )
+        )
     except ApiException as e:
         raise api_error(e, "Service not found")
 
@@ -992,14 +1068,18 @@ def get_service_data(namespace: str, service_name: str) -> Dict[str, Any]:
 def list_persistent_volumes_data() -> Dict[str, Any]:
     try:
         pvs = core_v1.list_persistent_volume()
-        return list_response([summarize_persistent_volume(p) for p in pvs.items], "PersistentVolumeList")
+        return list_response(
+            [summarize_persistent_volume(p) for p in pvs.items], "PersistentVolumeList"
+        )
     except ApiException as e:
         raise api_error(e)
 
 
 def get_persistent_volume_data(pv_name: str) -> Dict[str, Any]:
     try:
-        return summarize_persistent_volume(core_v1.read_persistent_volume(validated_name(pv_name)))
+        return summarize_persistent_volume(
+            core_v1.read_persistent_volume(validated_name(pv_name))
+        )
     except ApiException as e:
         raise api_error(e, "PersistentVolume not found")
 
@@ -1007,15 +1087,21 @@ def get_persistent_volume_data(pv_name: str) -> Dict[str, Any]:
 def list_storage_classes_data() -> Dict[str, Any]:
     try:
         scs = storage_v1.list_storage_class()
-        return list_response([summarize_storage_class(s) for s in scs.items], "StorageClassList")
+        return list_response(
+            [summarize_storage_class(s) for s in scs.items], "StorageClassList"
+        )
     except ApiException as e:
         raise api_error(e)
 
 
 def list_pvcs_data(namespace: str) -> Dict[str, Any]:
     try:
-        pvcs = core_v1.list_namespaced_persistent_volume_claim(validated_name(namespace))
-        return list_response([summarize_pvc(p) for p in pvcs.items], "PersistentVolumeClaimList")
+        pvcs = core_v1.list_namespaced_persistent_volume_claim(
+            validated_name(namespace)
+        )
+        return list_response(
+            [summarize_pvc(p) for p in pvcs.items], "PersistentVolumeClaimList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1023,7 +1109,9 @@ def list_pvcs_data(namespace: str) -> Dict[str, Any]:
 def get_pvc_data(namespace: str, pvc_name: str) -> Dict[str, Any]:
     try:
         return summarize_pvc(
-            core_v1.read_namespaced_persistent_volume_claim(validated_name(pvc_name), validated_name(namespace))
+            core_v1.read_namespaced_persistent_volume_claim(
+                validated_name(pvc_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "PersistentVolumeClaim not found")
@@ -1032,7 +1120,9 @@ def get_pvc_data(namespace: str, pvc_name: str) -> Dict[str, Any]:
 def list_config_maps_data(namespace: str) -> Dict[str, Any]:
     try:
         cms = core_v1.list_namespaced_config_map(validated_name(namespace))
-        return list_response([summarize_config_map(c) for c in cms.items], "ConfigMapList")
+        return list_response(
+            [summarize_config_map(c) for c in cms.items], "ConfigMapList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1040,7 +1130,9 @@ def list_config_maps_data(namespace: str) -> Dict[str, Any]:
 def get_config_map_data(namespace: str, cm_name: str) -> Dict[str, Any]:
     try:
         return summarize_config_map(
-            core_v1.read_namespaced_config_map(validated_name(cm_name), validated_name(namespace))
+            core_v1.read_namespaced_config_map(
+                validated_name(cm_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "ConfigMap not found")
@@ -1049,7 +1141,9 @@ def get_config_map_data(namespace: str, cm_name: str) -> Dict[str, Any]:
 def list_service_accounts_data(namespace: str) -> Dict[str, Any]:
     try:
         sas = core_v1.list_namespaced_service_account(validated_name(namespace))
-        return list_response([summarize_service_account(s) for s in sas.items], "ServiceAccountList")
+        return list_response(
+            [summarize_service_account(s) for s in sas.items], "ServiceAccountList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1057,7 +1151,9 @@ def list_service_accounts_data(namespace: str) -> Dict[str, Any]:
 def get_service_account_data(namespace: str, sa_name: str) -> Dict[str, Any]:
     try:
         return summarize_service_account(
-            core_v1.read_namespaced_service_account(validated_name(sa_name), validated_name(namespace))
+            core_v1.read_namespaced_service_account(
+                validated_name(sa_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "ServiceAccount not found")
@@ -1066,7 +1162,9 @@ def get_service_account_data(namespace: str, sa_name: str) -> Dict[str, Any]:
 def list_resource_quotas_data(namespace: str) -> Dict[str, Any]:
     try:
         rqs = core_v1.list_namespaced_resource_quota(validated_name(namespace))
-        return list_response([summarize_resource_quota(r) for r in rqs.items], "ResourceQuotaList")
+        return list_response(
+            [summarize_resource_quota(r) for r in rqs.items], "ResourceQuotaList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1074,7 +1172,9 @@ def list_resource_quotas_data(namespace: str) -> Dict[str, Any]:
 def get_resource_quota_data(namespace: str, rq_name: str) -> Dict[str, Any]:
     try:
         return summarize_resource_quota(
-            core_v1.read_namespaced_resource_quota(validated_name(rq_name), validated_name(namespace))
+            core_v1.read_namespaced_resource_quota(
+                validated_name(rq_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "ResourceQuota not found")
@@ -1083,7 +1183,9 @@ def get_resource_quota_data(namespace: str, rq_name: str) -> Dict[str, Any]:
 def list_limit_ranges_data(namespace: str) -> Dict[str, Any]:
     try:
         lrs = core_v1.list_namespaced_limit_range(validated_name(namespace))
-        return list_response([summarize_limit_range(r) for r in lrs.items], "LimitRangeList")
+        return list_response(
+            [summarize_limit_range(r) for r in lrs.items], "LimitRangeList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1091,10 +1193,16 @@ def list_limit_ranges_data(namespace: str) -> Dict[str, Any]:
 # ============================================================
 # Data functions — Kubernetes apps
 # ============================================================
-def list_deployments_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_deployments_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     try:
-        deps = apps_v1.list_namespaced_deployment(validated_name(namespace), label_selector=label_selector)
-        return list_response([summarize_deployment(d) for d in deps.items], "DeploymentList")
+        deps = apps_v1.list_namespaced_deployment(
+            validated_name(namespace), label_selector=label_selector
+        )
+        return list_response(
+            [summarize_deployment(d) for d in deps.items], "DeploymentList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1102,25 +1210,33 @@ def list_deployments_data(namespace: str, label_selector: Optional[str] = None) 
 def get_deployment_data(namespace: str, deployment_name: str) -> Dict[str, Any]:
     try:
         return summarize_deployment(
-            apps_v1.read_namespaced_deployment(validated_name(deployment_name), validated_name(namespace))
+            apps_v1.read_namespaced_deployment(
+                validated_name(deployment_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "Deployment not found")
 
 
-def rollout_restart_deployment_data(namespace: str, deployment_name: str) -> Dict[str, Any]:
+def rollout_restart_deployment_data(
+    namespace: str, deployment_name: str
+) -> Dict[str, Any]:
     try:
         restarted_at = datetime.now(timezone.utc).isoformat()
         body = {
             "spec": {
                 "template": {
                     "metadata": {
-                        "annotations": {"kubectl.kubernetes.io/restartedAt": restarted_at}
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": restarted_at
+                        }
                     }
                 }
             }
         }
-        apps_v1.patch_namespaced_deployment(validated_name(deployment_name), validated_name(namespace), body)
+        apps_v1.patch_namespaced_deployment(
+            validated_name(deployment_name), validated_name(namespace), body
+        )
         return {
             "status": "rollout_restart_requested",
             "name": deployment_name,
@@ -1131,14 +1247,21 @@ def rollout_restart_deployment_data(namespace: str, deployment_name: str) -> Dic
         raise api_error(e, "Deployment not found")
 
 
-def scale_deployment_data(namespace: str, deployment_name: str, replicas: int) -> Dict[str, Any]:
+def scale_deployment_data(
+    namespace: str, deployment_name: str, replicas: int
+) -> Dict[str, Any]:
     try:
         apps_v1.patch_namespaced_deployment(
             validated_name(deployment_name),
             validated_name(namespace),
             {"spec": {"replicas": replicas}},
         )
-        return {"status": "scale_requested", "name": deployment_name, "namespace": namespace, "replicas": replicas}
+        return {
+            "status": "scale_requested",
+            "name": deployment_name,
+            "namespace": namespace,
+            "replicas": replicas,
+        }
     except ApiException as e:
         raise api_error(e, "Deployment not found")
 
@@ -1155,25 +1278,36 @@ def update_deployment_container_resources_data(
         )
         containers = deployment.spec.template.spec.containers or []
         if not any(c.name == container_name for c in containers):
-            raise HTTPException(status_code=404, detail="Container not found in deployment")
+            raise HTTPException(
+                status_code=404, detail="Container not found in deployment"
+            )
         patch_resources: Dict[str, Any] = {}
         if resources.limits is not None:
             patch_resources["limits"] = resources.limits
         if resources.requests is not None:
             patch_resources["requests"] = resources.requests
         if not patch_resources:
-            raise HTTPException(status_code=400, detail="At least one of limits or requests must be provided")
+            raise HTTPException(
+                status_code=400,
+                detail="At least one of limits or requests must be provided",
+            )
         body = {
             "spec": {
                 "template": {
                     "spec": {
-                        "containers": [{"name": container_name, "resources": patch_resources}]
+                        "containers": [
+                            {"name": container_name, "resources": patch_resources}
+                        ]
                     }
                 }
             }
         }
-        updated = apps_v1.patch_namespaced_deployment(validated_name(deployment_name), validated_name(namespace), body)
-        matching = next(c for c in updated.spec.template.spec.containers if c.name == container_name)
+        updated = apps_v1.patch_namespaced_deployment(
+            validated_name(deployment_name), validated_name(namespace), body
+        )
+        matching = next(
+            c for c in updated.spec.template.spec.containers if c.name == container_name
+        )
         return {
             "status": "resources_updated",
             "deployment": deployment_name,
@@ -1184,10 +1318,16 @@ def update_deployment_container_resources_data(
         raise api_error(e, "Deployment not found")
 
 
-def list_statefulsets_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_statefulsets_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     try:
-        ssets = apps_v1.list_namespaced_stateful_set(validated_name(namespace), label_selector=label_selector)
-        return list_response([summarize_statefulset(s) for s in ssets.items], "StatefulSetList")
+        ssets = apps_v1.list_namespaced_stateful_set(
+            validated_name(namespace), label_selector=label_selector
+        )
+        return list_response(
+            [summarize_statefulset(s) for s in ssets.items], "StatefulSetList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1195,7 +1335,9 @@ def list_statefulsets_data(namespace: str, label_selector: Optional[str] = None)
 def get_statefulset_data(namespace: str, name: str) -> Dict[str, Any]:
     try:
         return summarize_statefulset(
-            apps_v1.read_namespaced_stateful_set(validated_name(name), validated_name(namespace))
+            apps_v1.read_namespaced_stateful_set(
+                validated_name(name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "StatefulSet not found")
@@ -1208,13 +1350,22 @@ def rollout_restart_statefulset_data(namespace: str, name: str) -> Dict[str, Any
             "spec": {
                 "template": {
                     "metadata": {
-                        "annotations": {"kubectl.kubernetes.io/restartedAt": restarted_at}
+                        "annotations": {
+                            "kubectl.kubernetes.io/restartedAt": restarted_at
+                        }
                     }
                 }
             }
         }
-        apps_v1.patch_namespaced_stateful_set(validated_name(name), validated_name(namespace), body)
-        return {"status": "rollout_restart_requested", "name": name, "namespace": namespace, "restarted_at": restarted_at}
+        apps_v1.patch_namespaced_stateful_set(
+            validated_name(name), validated_name(namespace), body
+        )
+        return {
+            "status": "rollout_restart_requested",
+            "name": name,
+            "namespace": namespace,
+            "restarted_at": restarted_at,
+        }
     except ApiException as e:
         raise api_error(e, "StatefulSet not found")
 
@@ -1226,15 +1377,26 @@ def scale_statefulset_data(namespace: str, name: str, replicas: int) -> Dict[str
             validated_name(namespace),
             {"spec": {"replicas": replicas}},
         )
-        return {"status": "scale_requested", "name": name, "namespace": namespace, "replicas": replicas}
+        return {
+            "status": "scale_requested",
+            "name": name,
+            "namespace": namespace,
+            "replicas": replicas,
+        }
     except ApiException as e:
         raise api_error(e, "StatefulSet not found")
 
 
-def list_daemonsets_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_daemonsets_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     try:
-        dsets = apps_v1.list_namespaced_daemon_set(validated_name(namespace), label_selector=label_selector)
-        return list_response([summarize_daemonset(d) for d in dsets.items], "DaemonSetList")
+        dsets = apps_v1.list_namespaced_daemon_set(
+            validated_name(namespace), label_selector=label_selector
+        )
+        return list_response(
+            [summarize_daemonset(d) for d in dsets.items], "DaemonSetList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1242,24 +1404,36 @@ def list_daemonsets_data(namespace: str, label_selector: Optional[str] = None) -
 def get_daemonset_data(namespace: str, name: str) -> Dict[str, Any]:
     try:
         return summarize_daemonset(
-            apps_v1.read_namespaced_daemon_set(validated_name(name), validated_name(namespace))
+            apps_v1.read_namespaced_daemon_set(
+                validated_name(name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "DaemonSet not found")
 
 
-def list_replicasets_data(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_replicasets_data(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     try:
-        rsets = apps_v1.list_namespaced_replica_set(validated_name(namespace), label_selector=label_selector)
-        return list_response([summarize_replicaset(r) for r in rsets.items], "ReplicaSetList")
+        rsets = apps_v1.list_namespaced_replica_set(
+            validated_name(namespace), label_selector=label_selector
+        )
+        return list_response(
+            [summarize_replicaset(r) for r in rsets.items], "ReplicaSetList"
+        )
     except ApiException as e:
         raise api_error(e)
 
 
 def list_hpas_data(namespace: str) -> Dict[str, Any]:
     try:
-        hpas = autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(validated_name(namespace))
-        return list_response([summarize_hpa(h) for h in hpas.items], "HorizontalPodAutoscalerList")
+        hpas = autoscaling_v2.list_namespaced_horizontal_pod_autoscaler(
+            validated_name(namespace)
+        )
+        return list_response(
+            [summarize_hpa(h) for h in hpas.items], "HorizontalPodAutoscalerList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1267,7 +1441,9 @@ def list_hpas_data(namespace: str) -> Dict[str, Any]:
 def get_hpa_data(namespace: str, name: str) -> Dict[str, Any]:
     try:
         return summarize_hpa(
-            autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(validated_name(name), validated_name(namespace))
+            autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
+                validated_name(name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "HorizontalPodAutoscaler not found")
@@ -1284,7 +1460,9 @@ def list_ingresses_data(namespace: str) -> Dict[str, Any]:
 def get_ingress_data(namespace: str, name: str) -> Dict[str, Any]:
     try:
         return summarize_ingress(
-            networking_v1.read_namespaced_ingress(validated_name(name), validated_name(namespace))
+            networking_v1.read_namespaced_ingress(
+                validated_name(name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "Ingress not found")
@@ -1293,7 +1471,9 @@ def get_ingress_data(namespace: str, name: str) -> Dict[str, Any]:
 def list_network_policies_data(namespace: str) -> Dict[str, Any]:
     try:
         nps = networking_v1.list_namespaced_network_policy(validated_name(namespace))
-        return list_response([summarize_network_policy(n) for n in nps.items], "NetworkPolicyList")
+        return list_response(
+            [summarize_network_policy(n) for n in nps.items], "NetworkPolicyList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1311,7 +1491,11 @@ def list_jobs_data(namespace: str) -> Dict[str, Any]:
 
 def get_job_data(namespace: str, job_name: str) -> Dict[str, Any]:
     try:
-        return summarize_job(batch_v1.read_namespaced_job(validated_name(job_name), validated_name(namespace)))
+        return summarize_job(
+            batch_v1.read_namespaced_job(
+                validated_name(job_name), validated_name(namespace)
+            )
+        )
     except ApiException as e:
         raise api_error(e, "Job not found")
 
@@ -1327,7 +1511,9 @@ def list_cronjobs_data(namespace: str) -> Dict[str, Any]:
 def get_cronjob_data(namespace: str, cronjob_name: str) -> Dict[str, Any]:
     try:
         return summarize_cronjob(
-            batch_v1.read_namespaced_cron_job(validated_name(cronjob_name), validated_name(namespace))
+            batch_v1.read_namespaced_cron_job(
+                validated_name(cronjob_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "CronJob not found")
@@ -1343,7 +1529,11 @@ def list_roles_data(namespace: str) -> Dict[str, Any]:
 
 def get_role_data(namespace: str, role_name: str) -> Dict[str, Any]:
     try:
-        return summarize_role(rbac_v1.read_namespaced_role(validated_name(role_name), validated_name(namespace)))
+        return summarize_role(
+            rbac_v1.read_namespaced_role(
+                validated_name(role_name), validated_name(namespace)
+            )
+        )
     except ApiException as e:
         raise api_error(e, "Role not found")
 
@@ -1351,7 +1541,9 @@ def get_role_data(namespace: str, role_name: str) -> Dict[str, Any]:
 def list_role_bindings_data(namespace: str) -> Dict[str, Any]:
     try:
         bindings = rbac_v1.list_namespaced_role_binding(validated_name(namespace))
-        return list_response([summarize_binding(b) for b in bindings.items], "RoleBindingList")
+        return list_response(
+            [summarize_binding(b) for b in bindings.items], "RoleBindingList"
+        )
     except ApiException as e:
         raise api_error(e)
 
@@ -1359,7 +1551,9 @@ def list_role_bindings_data(namespace: str) -> Dict[str, Any]:
 def get_role_binding_data(namespace: str, role_binding_name: str) -> Dict[str, Any]:
     try:
         return summarize_binding(
-            rbac_v1.read_namespaced_role_binding(validated_name(role_binding_name), validated_name(namespace))
+            rbac_v1.read_namespaced_role_binding(
+                validated_name(role_binding_name), validated_name(namespace)
+            )
         )
     except ApiException as e:
         raise api_error(e, "RoleBinding not found")
@@ -1368,14 +1562,18 @@ def get_role_binding_data(namespace: str, role_binding_name: str) -> Dict[str, A
 def list_cluster_roles_data() -> Dict[str, Any]:
     try:
         roles = rbac_v1.list_cluster_role()
-        return list_response([summarize_role(r) for r in roles.items], "ClusterRoleList")
+        return list_response(
+            [summarize_role(r) for r in roles.items], "ClusterRoleList"
+        )
     except ApiException as e:
         raise api_error(e)
 
 
 def get_cluster_role_data(cluster_role_name: str) -> Dict[str, Any]:
     try:
-        return summarize_role(rbac_v1.read_cluster_role(validated_name(cluster_role_name)))
+        return summarize_role(
+            rbac_v1.read_cluster_role(validated_name(cluster_role_name))
+        )
     except ApiException as e:
         raise api_error(e, "ClusterRole not found")
 
@@ -1383,14 +1581,18 @@ def get_cluster_role_data(cluster_role_name: str) -> Dict[str, Any]:
 def list_cluster_role_bindings_data() -> Dict[str, Any]:
     try:
         bindings = rbac_v1.list_cluster_role_binding()
-        return list_response([summarize_binding(b) for b in bindings.items], "ClusterRoleBindingList")
+        return list_response(
+            [summarize_binding(b) for b in bindings.items], "ClusterRoleBindingList"
+        )
     except ApiException as e:
         raise api_error(e)
 
 
 def get_cluster_role_binding_data(cluster_role_binding_name: str) -> Dict[str, Any]:
     try:
-        return summarize_binding(rbac_v1.read_cluster_role_binding(validated_name(cluster_role_binding_name)))
+        return summarize_binding(
+            rbac_v1.read_cluster_role_binding(validated_name(cluster_role_binding_name))
+        )
     except ApiException as e:
         raise api_error(e, "ClusterRoleBinding not found")
 
@@ -1398,17 +1600,31 @@ def get_cluster_role_binding_data(cluster_role_binding_name: str) -> Dict[str, A
 # ============================================================
 # Data functions — OpenShift custom resources
 # ============================================================
-def _list_namespaced(group: str, version: str, namespace: str, plural: str, summarizer, kind: str) -> Dict[str, Any]:
+def _list_namespaced(
+    group: str, version: str, namespace: str, plural: str, summarizer, kind: str
+) -> Dict[str, Any]:
     try:
-        result = custom_objects.list_namespaced_custom_object(group, version, validated_name(namespace), plural)
-        return list_response([summarizer(item) for item in result.get("items", [])], kind)
+        result = custom_objects.list_namespaced_custom_object(
+            group, version, validated_name(namespace), plural
+        )
+        return list_response(
+            [summarizer(item) for item in result.get("items", [])], kind
+        )
     except ApiException as e:
         if e.status == 404:
             raise crd_not_available(kind)
         raise api_error(e)
 
 
-def _get_namespaced(group: str, version: str, namespace: str, plural: str, name: str, summarizer, not_found_msg: str) -> Dict[str, Any]:
+def _get_namespaced(
+    group: str,
+    version: str,
+    namespace: str,
+    plural: str,
+    name: str,
+    summarizer,
+    not_found_msg: str,
+) -> Dict[str, Any]:
     try:
         obj = custom_objects.get_namespaced_custom_object(
             group, version, validated_name(namespace), plural, validated_name(name)
@@ -1420,19 +1636,27 @@ def _get_namespaced(group: str, version: str, namespace: str, plural: str, name:
         raise api_error(e)
 
 
-def _list_cluster(group: str, version: str, plural: str, summarizer, kind: str) -> Dict[str, Any]:
+def _list_cluster(
+    group: str, version: str, plural: str, summarizer, kind: str
+) -> Dict[str, Any]:
     try:
         result = custom_objects.list_cluster_custom_object(group, version, plural)
-        return list_response([summarizer(item) for item in result.get("items", [])], kind)
+        return list_response(
+            [summarizer(item) for item in result.get("items", [])], kind
+        )
     except ApiException as e:
         if e.status == 404:
             raise crd_not_available(kind)
         raise api_error(e)
 
 
-def _get_cluster(group: str, version: str, plural: str, name: str, summarizer, not_found_msg: str) -> Dict[str, Any]:
+def _get_cluster(
+    group: str, version: str, plural: str, name: str, summarizer, not_found_msg: str
+) -> Dict[str, Any]:
     try:
-        obj = custom_objects.get_cluster_custom_object(group, version, plural, validated_name(name))
+        obj = custom_objects.get_cluster_custom_object(
+            group, version, plural, validated_name(name)
+        )
         return summarizer(obj)
     except ApiException as e:
         if e.status == 404:
@@ -1442,29 +1666,72 @@ def _get_cluster(group: str, version: str, plural: str, name: str, summarizer, n
 
 # OpenShift Routes
 def list_routes_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OPENSHIFT_ROUTE_GROUP, OPENSHIFT_ROUTE_VERSION, namespace, OPENSHIFT_ROUTE_PLURAL, summarize_route, "RouteList")
+    return _list_namespaced(
+        OPENSHIFT_ROUTE_GROUP,
+        OPENSHIFT_ROUTE_VERSION,
+        namespace,
+        OPENSHIFT_ROUTE_PLURAL,
+        summarize_route,
+        "RouteList",
+    )
 
 
 def get_route_data(namespace: str, route_name: str) -> Dict[str, Any]:
-    return _get_namespaced(OPENSHIFT_ROUTE_GROUP, OPENSHIFT_ROUTE_VERSION, namespace, OPENSHIFT_ROUTE_PLURAL, route_name, summarize_route, "Route not found")
+    return _get_namespaced(
+        OPENSHIFT_ROUTE_GROUP,
+        OPENSHIFT_ROUTE_VERSION,
+        namespace,
+        OPENSHIFT_ROUTE_PLURAL,
+        route_name,
+        summarize_route,
+        "Route not found",
+    )
 
 
 # OpenShift Projects
 def list_projects_data() -> Dict[str, Any]:
-    return _list_cluster(OPENSHIFT_PROJECT_GROUP, OPENSHIFT_PROJECT_VERSION, OPENSHIFT_PROJECT_PLURAL, summarize_project, "ProjectList")
+    return _list_cluster(
+        OPENSHIFT_PROJECT_GROUP,
+        OPENSHIFT_PROJECT_VERSION,
+        OPENSHIFT_PROJECT_PLURAL,
+        summarize_project,
+        "ProjectList",
+    )
 
 
 def get_project_data(project_name: str) -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_PROJECT_GROUP, OPENSHIFT_PROJECT_VERSION, OPENSHIFT_PROJECT_PLURAL, project_name, summarize_project, "Project not found")
+    return _get_cluster(
+        OPENSHIFT_PROJECT_GROUP,
+        OPENSHIFT_PROJECT_VERSION,
+        OPENSHIFT_PROJECT_PLURAL,
+        project_name,
+        summarize_project,
+        "Project not found",
+    )
 
 
 # OpenShift DeploymentConfigs
 def list_deployment_configs_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OPENSHIFT_APPS_GROUP, OPENSHIFT_APPS_VERSION, namespace, "deploymentconfigs", summarize_deployment_config, "DeploymentConfigList")
+    return _list_namespaced(
+        OPENSHIFT_APPS_GROUP,
+        OPENSHIFT_APPS_VERSION,
+        namespace,
+        "deploymentconfigs",
+        summarize_deployment_config,
+        "DeploymentConfigList",
+    )
 
 
 def get_deployment_config_data(namespace: str, name: str) -> Dict[str, Any]:
-    return _get_namespaced(OPENSHIFT_APPS_GROUP, OPENSHIFT_APPS_VERSION, namespace, "deploymentconfigs", name, summarize_deployment_config, "DeploymentConfig not found")
+    return _get_namespaced(
+        OPENSHIFT_APPS_GROUP,
+        OPENSHIFT_APPS_VERSION,
+        namespace,
+        "deploymentconfigs",
+        name,
+        summarize_deployment_config,
+        "DeploymentConfig not found",
+    )
 
 
 def rollout_restart_deployment_config_data(namespace: str, name: str) -> Dict[str, Any]:
@@ -1478,7 +1745,8 @@ def rollout_restart_deployment_config_data(namespace: str, name: str) -> Dict[st
     }
     try:
         custom_objects.api_client.call_api(
-            path, "POST",
+            path,
+            "POST",
             header_params={"Content-Type": "application/json"},
             body=body,
             response_types_map={200: "object", 201: "object"},
@@ -1493,122 +1761,305 @@ def rollout_restart_deployment_config_data(namespace: str, name: str) -> Dict[st
 
 # OpenShift BuildConfigs / Builds
 def list_build_configs_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OPENSHIFT_BUILD_GROUP, OPENSHIFT_BUILD_VERSION, namespace, "buildconfigs", summarize_build_config, "BuildConfigList")
+    return _list_namespaced(
+        OPENSHIFT_BUILD_GROUP,
+        OPENSHIFT_BUILD_VERSION,
+        namespace,
+        "buildconfigs",
+        summarize_build_config,
+        "BuildConfigList",
+    )
 
 
 def get_build_config_data(namespace: str, name: str) -> Dict[str, Any]:
-    return _get_namespaced(OPENSHIFT_BUILD_GROUP, OPENSHIFT_BUILD_VERSION, namespace, "buildconfigs", name, summarize_build_config, "BuildConfig not found")
+    return _get_namespaced(
+        OPENSHIFT_BUILD_GROUP,
+        OPENSHIFT_BUILD_VERSION,
+        namespace,
+        "buildconfigs",
+        name,
+        summarize_build_config,
+        "BuildConfig not found",
+    )
 
 
 def list_builds_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OPENSHIFT_BUILD_GROUP, OPENSHIFT_BUILD_VERSION, namespace, "builds", summarize_build, "BuildList")
+    return _list_namespaced(
+        OPENSHIFT_BUILD_GROUP,
+        OPENSHIFT_BUILD_VERSION,
+        namespace,
+        "builds",
+        summarize_build,
+        "BuildList",
+    )
 
 
 def get_build_data(namespace: str, name: str) -> Dict[str, Any]:
-    return _get_namespaced(OPENSHIFT_BUILD_GROUP, OPENSHIFT_BUILD_VERSION, namespace, "builds", name, summarize_build, "Build not found")
+    return _get_namespaced(
+        OPENSHIFT_BUILD_GROUP,
+        OPENSHIFT_BUILD_VERSION,
+        namespace,
+        "builds",
+        name,
+        summarize_build,
+        "Build not found",
+    )
 
 
 # OpenShift ImageStreams
 def list_image_streams_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OPENSHIFT_IMAGE_GROUP, OPENSHIFT_IMAGE_VERSION, namespace, "imagestreams", summarize_image_stream, "ImageStreamList")
+    return _list_namespaced(
+        OPENSHIFT_IMAGE_GROUP,
+        OPENSHIFT_IMAGE_VERSION,
+        namespace,
+        "imagestreams",
+        summarize_image_stream,
+        "ImageStreamList",
+    )
 
 
 def get_image_stream_data(namespace: str, name: str) -> Dict[str, Any]:
-    return _get_namespaced(OPENSHIFT_IMAGE_GROUP, OPENSHIFT_IMAGE_VERSION, namespace, "imagestreams", name, summarize_image_stream, "ImageStream not found")
+    return _get_namespaced(
+        OPENSHIFT_IMAGE_GROUP,
+        OPENSHIFT_IMAGE_VERSION,
+        namespace,
+        "imagestreams",
+        name,
+        summarize_image_stream,
+        "ImageStream not found",
+    )
 
 
 # OpenShift Security Context Constraints
 def list_sccs_data() -> Dict[str, Any]:
-    return _list_cluster(OPENSHIFT_SECURITY_GROUP, OPENSHIFT_SECURITY_VERSION, "securitycontextconstraints", summarize_scc, "SecurityContextConstraintList")
+    return _list_cluster(
+        OPENSHIFT_SECURITY_GROUP,
+        OPENSHIFT_SECURITY_VERSION,
+        "securitycontextconstraints",
+        summarize_scc,
+        "SecurityContextConstraintList",
+    )
 
 
 def get_scc_data(name: str) -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_SECURITY_GROUP, OPENSHIFT_SECURITY_VERSION, "securitycontextconstraints", name, summarize_scc, "SecurityContextConstraint not found")
+    return _get_cluster(
+        OPENSHIFT_SECURITY_GROUP,
+        OPENSHIFT_SECURITY_VERSION,
+        "securitycontextconstraints",
+        name,
+        summarize_scc,
+        "SecurityContextConstraint not found",
+    )
 
 
 # OpenShift Users / Groups
 def list_users_data() -> Dict[str, Any]:
-    return _list_cluster(OPENSHIFT_USER_GROUP, OPENSHIFT_USER_VERSION, "users", summarize_user, "UserList")
+    return _list_cluster(
+        OPENSHIFT_USER_GROUP,
+        OPENSHIFT_USER_VERSION,
+        "users",
+        summarize_user,
+        "UserList",
+    )
 
 
 def get_user_data(name: str) -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_USER_GROUP, OPENSHIFT_USER_VERSION, "users", name, summarize_user, "User not found")
+    return _get_cluster(
+        OPENSHIFT_USER_GROUP,
+        OPENSHIFT_USER_VERSION,
+        "users",
+        name,
+        summarize_user,
+        "User not found",
+    )
 
 
 def list_groups_data() -> Dict[str, Any]:
-    return _list_cluster(OPENSHIFT_USER_GROUP, OPENSHIFT_USER_VERSION, "groups", summarize_group, "GroupList")
+    return _list_cluster(
+        OPENSHIFT_USER_GROUP,
+        OPENSHIFT_USER_VERSION,
+        "groups",
+        summarize_group,
+        "GroupList",
+    )
 
 
 def get_group_data(name: str) -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_USER_GROUP, OPENSHIFT_USER_VERSION, "groups", name, summarize_group, "Group not found")
+    return _get_cluster(
+        OPENSHIFT_USER_GROUP,
+        OPENSHIFT_USER_VERSION,
+        "groups",
+        name,
+        summarize_group,
+        "Group not found",
+    )
 
 
 # OpenShift ClusterVersion / ClusterOperators
 def get_cluster_version_data() -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_CONFIG_GROUP, OPENSHIFT_CONFIG_VERSION, "clusterversions", "version", summarize_cluster_version, "ClusterVersion not found")
+    return _get_cluster(
+        OPENSHIFT_CONFIG_GROUP,
+        OPENSHIFT_CONFIG_VERSION,
+        "clusterversions",
+        "version",
+        summarize_cluster_version,
+        "ClusterVersion not found",
+    )
 
 
 def list_cluster_operators_data() -> Dict[str, Any]:
-    return _list_cluster(OPENSHIFT_CONFIG_GROUP, OPENSHIFT_CONFIG_VERSION, "clusteroperators", summarize_cluster_operator, "ClusterOperatorList")
+    return _list_cluster(
+        OPENSHIFT_CONFIG_GROUP,
+        OPENSHIFT_CONFIG_VERSION,
+        "clusteroperators",
+        summarize_cluster_operator,
+        "ClusterOperatorList",
+    )
 
 
 def get_cluster_operator_data(name: str) -> Dict[str, Any]:
-    return _get_cluster(OPENSHIFT_CONFIG_GROUP, OPENSHIFT_CONFIG_VERSION, "clusteroperators", name, summarize_cluster_operator, "ClusterOperator not found")
+    return _get_cluster(
+        OPENSHIFT_CONFIG_GROUP,
+        OPENSHIFT_CONFIG_VERSION,
+        "clusteroperators",
+        name,
+        summarize_cluster_operator,
+        "ClusterOperator not found",
+    )
 
 
 # Machine Config
 def list_machine_config_pools_data() -> Dict[str, Any]:
-    return _list_cluster(MACHINE_CONFIG_GROUP, MACHINE_CONFIG_VERSION, "machineconfigpools", summarize_machine_config_pool, "MachineConfigPoolList")
+    return _list_cluster(
+        MACHINE_CONFIG_GROUP,
+        MACHINE_CONFIG_VERSION,
+        "machineconfigpools",
+        summarize_machine_config_pool,
+        "MachineConfigPoolList",
+    )
 
 
 def get_machine_config_pool_data(name: str) -> Dict[str, Any]:
-    return _get_cluster(MACHINE_CONFIG_GROUP, MACHINE_CONFIG_VERSION, "machineconfigpools", name, summarize_machine_config_pool, "MachineConfigPool not found")
+    return _get_cluster(
+        MACHINE_CONFIG_GROUP,
+        MACHINE_CONFIG_VERSION,
+        "machineconfigpools",
+        name,
+        summarize_machine_config_pool,
+        "MachineConfigPool not found",
+    )
 
 
 # Machine API
 def list_machines_data(namespace: str = "openshift-machine-api") -> Dict[str, Any]:
-    return _list_namespaced(MACHINE_GROUP, MACHINE_VERSION, namespace, "machines", summarize_machine, "MachineList")
+    return _list_namespaced(
+        MACHINE_GROUP,
+        MACHINE_VERSION,
+        namespace,
+        "machines",
+        summarize_machine,
+        "MachineList",
+    )
 
 
 def list_machine_sets_data(namespace: str = "openshift-machine-api") -> Dict[str, Any]:
-    return _list_namespaced(MACHINE_GROUP, MACHINE_VERSION, namespace, "machinesets", summarize_machine_set, "MachineSetList")
+    return _list_namespaced(
+        MACHINE_GROUP,
+        MACHINE_VERSION,
+        namespace,
+        "machinesets",
+        summarize_machine_set,
+        "MachineSetList",
+    )
 
 
 # OLM
 def list_subscriptions_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OLM_GROUP, OLM_VERSION, namespace, "subscriptions", summarize_subscription, "SubscriptionList")
+    return _list_namespaced(
+        OLM_GROUP,
+        OLM_VERSION,
+        namespace,
+        "subscriptions",
+        summarize_subscription,
+        "SubscriptionList",
+    )
 
 
 def list_installed_operators_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OLM_GROUP, OLM_VERSION, namespace, "clusterserviceversions", summarize_csv, "ClusterServiceVersionList")
+    return _list_namespaced(
+        OLM_GROUP,
+        OLM_VERSION,
+        namespace,
+        "clusterserviceversions",
+        summarize_csv,
+        "ClusterServiceVersionList",
+    )
 
 
 def list_catalog_sources_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(OLM_GROUP, OLM_VERSION, namespace, "catalogsources", summarize_catalog_source, "CatalogSourceList")
+    return _list_namespaced(
+        OLM_GROUP,
+        OLM_VERSION,
+        namespace,
+        "catalogsources",
+        summarize_catalog_source,
+        "CatalogSourceList",
+    )
 
 
 # KubeVirt VMs / VMIs
 def list_virtualmachines_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, KUBEVIRT_VM_PLURAL, summarize_virtualmachine, "VirtualMachineList")
+    return _list_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        KUBEVIRT_VM_PLURAL,
+        summarize_virtualmachine,
+        "VirtualMachineList",
+    )
 
 
 def get_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
-    return _get_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, KUBEVIRT_VM_PLURAL, vm_name, summarize_virtualmachine, "VirtualMachine not found")
+    return _get_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        KUBEVIRT_VM_PLURAL,
+        vm_name,
+        summarize_virtualmachine,
+        "VirtualMachine not found",
+    )
 
 
 def list_vmis_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, KUBEVIRT_VMI_PLURAL, summarize_vmi, "VirtualMachineInstanceList")
+    return _list_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        KUBEVIRT_VMI_PLURAL,
+        summarize_vmi,
+        "VirtualMachineInstanceList",
+    )
 
 
 def get_vmi_data(namespace: str, vmi_name: str) -> Dict[str, Any]:
-    return _get_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, KUBEVIRT_VMI_PLURAL, vmi_name, summarize_vmi, "VirtualMachineInstance not found")
+    return _get_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        KUBEVIRT_VMI_PLURAL,
+        vmi_name,
+        summarize_vmi,
+        "VirtualMachineInstance not found",
+    )
 
 
 def _vm_power_action(namespace: str, vm_name: str, action: str) -> Dict[str, Any]:
     path = f"/apis/subresources.kubevirt.io/v1/namespaces/{validated_name(namespace)}/virtualmachines/{validated_name(vm_name)}/{action}"
     try:
         custom_objects.api_client.call_api(
-            path, "PUT",
+            path,
+            "PUT",
             header_params={"Content-Type": "application/json"},
             body={},
             response_types_map={200: "object", 202: "object", 204: "object"},
@@ -1621,16 +2072,26 @@ def _vm_power_action(namespace: str, vm_name: str, action: str) -> Dict[str, Any
     return {"status": f"vm_{action}_requested", "name": vm_name, "namespace": namespace}
 
 
-def clone_virtualmachine_data(namespace: str, vm_name: str, new_vm_name: str) -> Dict[str, Any]:
+def clone_virtualmachine_data(
+    namespace: str, vm_name: str, new_vm_name: str
+) -> Dict[str, Any]:
     try:
         vm = get_virtualmachine_data(namespace, vm_name)
         vm_obj = custom_objects.get_namespaced_custom_object(
-            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VM_PLURAL, validated_name(vm_name)
+            KUBEVIRT_GROUP,
+            KUBEVIRT_VERSION,
+            validated_name(namespace),
+            KUBEVIRT_VM_PLURAL,
+            validated_name(vm_name),
         )
         spec = vm_obj.get("spec", {})
         new_spec = {"metadata": {"name": validated_name(new_vm_name)}, "spec": spec}
         result = custom_objects.create_namespaced_custom_object(
-            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VM_PLURAL, new_spec
+            KUBEVIRT_GROUP,
+            KUBEVIRT_VERSION,
+            validated_name(namespace),
+            KUBEVIRT_VM_PLURAL,
+            new_spec,
         )
         return {
             "status": "clone_requested",
@@ -1655,7 +2116,8 @@ def force_reboot_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, 
     body = {"force": True}
     try:
         custom_objects.api_client.call_api(
-            path, "PUT",
+            path,
+            "PUT",
             header_params={"Content-Type": "application/json"},
             body=body,
             response_types_map={200: "object", 202: "object", 204: "object"},
@@ -1669,19 +2131,34 @@ def force_reboot_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, 
 
 
 def list_vm_snapshots_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, "virtualmachinesnapshots", lambda s: s, "VirtualMachineSnapshotList")
+    return _list_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        "virtualmachinesnapshots",
+        lambda s: s,
+        "VirtualMachineSnapshotList",
+    )
 
 
-def create_vm_snapshot_data(namespace: str, vm_name: str, snapshot_name: str) -> Dict[str, Any]:
+def create_vm_snapshot_data(
+    namespace: str, vm_name: str, snapshot_name: str
+) -> Dict[str, Any]:
     try:
         snapshot_obj = {
             "apiVersion": f"{KUBEVIRT_GROUP}/{KUBEVIRT_VERSION}",
             "kind": "VirtualMachineSnapshot",
             "metadata": {"name": validated_name(snapshot_name)},
-            "spec": {"source": {"name": validated_name(vm_name), "kind": "VirtualMachine"}},
+            "spec": {
+                "source": {"name": validated_name(vm_name), "kind": "VirtualMachine"}
+            },
         }
         result = custom_objects.create_namespaced_custom_object(
-            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), "virtualmachinesnapshots", snapshot_obj
+            KUBEVIRT_GROUP,
+            KUBEVIRT_VERSION,
+            validated_name(namespace),
+            "virtualmachinesnapshots",
+            snapshot_obj,
         )
         return {
             "status": "snapshot_requested",
@@ -1696,7 +2173,11 @@ def create_vm_snapshot_data(namespace: str, vm_name: str, snapshot_name: str) ->
 def delete_vm_snapshot_data(namespace: str, snapshot_name: str) -> Dict[str, Any]:
     try:
         custom_objects.delete_namespaced_custom_object(
-            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), "virtualmachinesnapshots", validated_name(snapshot_name)
+            KUBEVIRT_GROUP,
+            KUBEVIRT_VERSION,
+            validated_name(namespace),
+            "virtualmachinesnapshots",
+            validated_name(snapshot_name),
         )
         return {
             "status": "snapshot_deleted",
@@ -1708,17 +2189,36 @@ def delete_vm_snapshot_data(namespace: str, snapshot_name: str) -> Dict[str, Any
 
 
 def list_data_volumes_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced("cdi.kubevirt.io", "v1beta1", namespace, "datavolumes", lambda d: d, "DataVolumeList")
+    return _list_namespaced(
+        "cdi.kubevirt.io",
+        "v1beta1",
+        namespace,
+        "datavolumes",
+        lambda d: d,
+        "DataVolumeList",
+    )
 
 
 def get_data_volume_data(namespace: str, dv_name: str) -> Dict[str, Any]:
-    return _get_namespaced("cdi.kubevirt.io", "v1beta1", namespace, "datavolumes", dv_name, lambda d: d, "DataVolume not found")
+    return _get_namespaced(
+        "cdi.kubevirt.io",
+        "v1beta1",
+        namespace,
+        "datavolumes",
+        dv_name,
+        lambda d: d,
+        "DataVolume not found",
+    )
 
 
 def get_vm_console_data(namespace: str, vm_name: str) -> Dict[str, Any]:
     try:
         vmi = custom_objects.get_namespaced_custom_object(
-            KUBEVIRT_GROUP, KUBEVIRT_VERSION, validated_name(namespace), KUBEVIRT_VMI_PLURAL, validated_name(vm_name)
+            KUBEVIRT_GROUP,
+            KUBEVIRT_VERSION,
+            validated_name(namespace),
+            KUBEVIRT_VMI_PLURAL,
+            validated_name(vm_name),
         )
         status = vmi.get("status", {})
         graphics = status.get("graphics", [])
@@ -1734,7 +2234,14 @@ def get_vm_console_data(namespace: str, vm_name: str) -> Dict[str, Any]:
 
 
 def list_vm_restores_data(namespace: str) -> Dict[str, Any]:
-    return _list_namespaced(KUBEVIRT_GROUP, KUBEVIRT_VERSION, namespace, "virtualmachinerestores", lambda r: r, "VirtualMachineRestoreList")
+    return _list_namespaced(
+        KUBEVIRT_GROUP,
+        KUBEVIRT_VERSION,
+        namespace,
+        "virtualmachinerestores",
+        lambda r: r,
+        "VirtualMachineRestoreList",
+    )
 
 
 # ============================================================
@@ -1769,16 +2276,19 @@ mcp = FastMCP(
     ),
 )
 
+
 # --- MCP tools: namespaces ---
 @mcp.tool()
 def list_namespaces() -> Dict[str, Any]:
     """List all Kubernetes namespaces with status, labels and annotations."""
     return list_namespaces_data()
 
+
 @mcp.tool()
 def get_namespace(namespace: str) -> Dict[str, Any]:
     """Get details for one Kubernetes namespace."""
     return get_namespace_data(namespace)
+
 
 # --- MCP tools: nodes ---
 @mcp.tool()
@@ -1786,10 +2296,12 @@ def list_nodes(label_selector: Optional[str] = None) -> Dict[str, Any]:
     """List cluster nodes with roles, capacity, allocatable resources and conditions."""
     return list_nodes_data(label_selector)
 
+
 @mcp.tool()
 def get_node(node_name: str) -> Dict[str, Any]:
     """Get detailed info for one cluster node including taints and hardware info."""
     return get_node_data(node_name)
+
 
 # --- MCP tools: pods ---
 @mcp.tool()
@@ -1797,10 +2309,12 @@ def list_pods(namespace: str, label_selector: Optional[str] = None) -> Dict[str,
     """List pods in a namespace, optionally filtered by label selector."""
     return list_pods_data(namespace, label_selector)
 
+
 @mcp.tool()
 def get_pod(namespace: str, pod_name: str) -> Dict[str, Any]:
     """Get one pod with container statuses, restart counts, resources and conditions."""
     return get_pod_data(namespace, pod_name)
+
 
 @mcp.tool()
 def get_pod_logs(
@@ -1812,23 +2326,51 @@ def get_pod_logs(
     previous: bool = False,
 ) -> Dict[str, Any]:
     """Read logs from a pod container."""
-    return get_pod_logs_data(namespace, pod_name, LogQuery(container=container, tail_lines=tail_lines, since_seconds=since_seconds, previous=previous))
+    return get_pod_logs_data(
+        namespace,
+        pod_name,
+        LogQuery(
+            container=container,
+            tail_lines=tail_lines,
+            since_seconds=since_seconds,
+            previous=previous,
+        ),
+    )
+
 
 @mcp.tool()
-def delete_pod(namespace: str, pod_name: str, grace_period_seconds: Optional[int] = None, force: bool = False) -> Dict[str, Any]:
+def delete_pod(
+    namespace: str,
+    pod_name: str,
+    grace_period_seconds: Optional[int] = None,
+    force: bool = False,
+) -> Dict[str, Any]:
     """Delete a pod. Use force=True to set grace period to 0."""
-    return delete_pod_data(namespace, pod_name, DeleteOptions(grace_period_seconds=grace_period_seconds, force=force))
+    return delete_pod_data(
+        namespace,
+        pod_name,
+        DeleteOptions(grace_period_seconds=grace_period_seconds, force=force),
+    )
+
 
 @mcp.tool()
-def list_containers(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_containers(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     """List containers across pods in a namespace with image, readiness, restarts and resources."""
     return list_containers_data(namespace, label_selector)
 
+
 # --- MCP tools: events ---
 @mcp.tool()
-def list_events(namespace: str, involved_object_name: Optional[str] = None, involved_object_kind: Optional[str] = None) -> Dict[str, Any]:
+def list_events(
+    namespace: str,
+    involved_object_name: Optional[str] = None,
+    involved_object_kind: Optional[str] = None,
+) -> Dict[str, Any]:
     """List namespace events, optionally filtered by involved object name and kind."""
     return list_events_data(namespace, involved_object_name, involved_object_kind)
+
 
 # --- MCP tools: services ---
 @mcp.tool()
@@ -1836,33 +2378,45 @@ def list_services(namespace: str) -> Dict[str, Any]:
     """List services in a namespace."""
     return list_services_data(namespace)
 
+
 @mcp.tool()
 def get_service(namespace: str, service_name: str) -> Dict[str, Any]:
     """Get one service in a namespace."""
     return get_service_data(namespace, service_name)
 
+
 # --- MCP tools: deployments ---
 @mcp.tool()
-def list_deployments(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_deployments(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     """List deployments in a namespace with rollout and container resource summaries."""
     return list_deployments_data(namespace, label_selector)
+
 
 @mcp.tool()
 def get_deployment(namespace: str, deployment_name: str) -> Dict[str, Any]:
     """Get one deployment with rollout status and container resources."""
     return get_deployment_data(namespace, deployment_name)
 
+
 @mcp.tool()
 def rollout_restart_deployment(namespace: str, deployment_name: str) -> Dict[str, Any]:
     """Request a rollout restart for one deployment."""
     return rollout_restart_deployment_data(namespace, deployment_name)
 
+
 @mcp.tool()
-def scale_deployment(namespace: str, deployment_name: str, replicas: int) -> Dict[str, Any]:
+def scale_deployment(
+    namespace: str, deployment_name: str, replicas: int
+) -> Dict[str, Any]:
     """Scale a deployment to the given number of replicas (0–500)."""
     if replicas < 0 or replicas > 500:
-        raise HTTPException(status_code=400, detail="replicas must be between 0 and 500")
+        raise HTTPException(
+            status_code=400, detail="replicas must be between 0 and 500"
+        )
     return scale_deployment_data(namespace, deployment_name, replicas)
+
 
 @mcp.tool()
 def update_deployment_container_resources(
@@ -1873,46 +2427,71 @@ def update_deployment_container_resources(
     requests: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Update CPU/memory limits and requests for one deployment container."""
-    return update_deployment_container_resources_data(namespace, deployment_name, container_name, ResourceRequirementsPatch(limits=limits, requests=requests))
+    return update_deployment_container_resources_data(
+        namespace,
+        deployment_name,
+        container_name,
+        ResourceRequirementsPatch(limits=limits, requests=requests),
+    )
+
 
 # --- MCP tools: statefulsets ---
 @mcp.tool()
-def list_statefulsets(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_statefulsets(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     """List StatefulSets in a namespace."""
     return list_statefulsets_data(namespace, label_selector)
+
 
 @mcp.tool()
 def get_statefulset(namespace: str, statefulset_name: str) -> Dict[str, Any]:
     """Get one StatefulSet with replica counts and container info."""
     return get_statefulset_data(namespace, statefulset_name)
 
+
 @mcp.tool()
-def rollout_restart_statefulset(namespace: str, statefulset_name: str) -> Dict[str, Any]:
+def rollout_restart_statefulset(
+    namespace: str, statefulset_name: str
+) -> Dict[str, Any]:
     """Request a rollout restart for one StatefulSet."""
     return rollout_restart_statefulset_data(namespace, statefulset_name)
 
+
 @mcp.tool()
-def scale_statefulset(namespace: str, statefulset_name: str, replicas: int) -> Dict[str, Any]:
+def scale_statefulset(
+    namespace: str, statefulset_name: str, replicas: int
+) -> Dict[str, Any]:
     """Scale a StatefulSet to the given number of replicas (0–500)."""
     if replicas < 0 or replicas > 500:
-        raise HTTPException(status_code=400, detail="replicas must be between 0 and 500")
+        raise HTTPException(
+            status_code=400, detail="replicas must be between 0 and 500"
+        )
     return scale_statefulset_data(namespace, statefulset_name, replicas)
+
 
 # --- MCP tools: daemonsets / replicasets ---
 @mcp.tool()
-def list_daemonsets(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_daemonsets(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     """List DaemonSets in a namespace with scheduling and readiness counts."""
     return list_daemonsets_data(namespace, label_selector)
+
 
 @mcp.tool()
 def get_daemonset(namespace: str, daemonset_name: str) -> Dict[str, Any]:
     """Get one DaemonSet with scheduling and readiness details."""
     return get_daemonset_data(namespace, daemonset_name)
 
+
 @mcp.tool()
-def list_replicasets(namespace: str, label_selector: Optional[str] = None) -> Dict[str, Any]:
+def list_replicasets(
+    namespace: str, label_selector: Optional[str] = None
+) -> Dict[str, Any]:
     """List ReplicaSets in a namespace."""
     return list_replicasets_data(namespace, label_selector)
+
 
 # --- MCP tools: HPAs ---
 @mcp.tool()
@@ -1920,10 +2499,12 @@ def list_hpas(namespace: str) -> Dict[str, Any]:
     """List HorizontalPodAutoscalers in a namespace."""
     return list_hpas_data(namespace)
 
+
 @mcp.tool()
 def get_hpa(namespace: str, hpa_name: str) -> Dict[str, Any]:
     """Get one HorizontalPodAutoscaler with current/desired replicas and metrics."""
     return get_hpa_data(namespace, hpa_name)
+
 
 # --- MCP tools: ingresses / network policies ---
 @mcp.tool()
@@ -1931,15 +2512,18 @@ def list_ingresses(namespace: str) -> Dict[str, Any]:
     """List Ingresses in a namespace."""
     return list_ingresses_data(namespace)
 
+
 @mcp.tool()
 def get_ingress(namespace: str, ingress_name: str) -> Dict[str, Any]:
     """Get one Ingress with rules, TLS and load balancer info."""
     return get_ingress_data(namespace, ingress_name)
 
+
 @mcp.tool()
 def list_network_policies(namespace: str) -> Dict[str, Any]:
     """List NetworkPolicies in a namespace with ingress/egress rules."""
     return list_network_policies_data(namespace)
+
 
 # --- MCP tools: storage ---
 @mcp.tool()
@@ -1947,25 +2531,30 @@ def list_persistent_volumes() -> Dict[str, Any]:
     """List cluster-wide PersistentVolumes with capacity and claim info."""
     return list_persistent_volumes_data()
 
+
 @mcp.tool()
 def get_persistent_volume(pv_name: str) -> Dict[str, Any]:
     """Get one PersistentVolume."""
     return get_persistent_volume_data(pv_name)
+
 
 @mcp.tool()
 def list_storage_classes() -> Dict[str, Any]:
     """List cluster StorageClasses with provisioner and reclaim policy."""
     return list_storage_classes_data()
 
+
 @mcp.tool()
 def list_persistent_volume_claims(namespace: str) -> Dict[str, Any]:
     """List PersistentVolumeClaims in a namespace."""
     return list_pvcs_data(namespace)
 
+
 @mcp.tool()
 def get_persistent_volume_claim(namespace: str, pvc_name: str) -> Dict[str, Any]:
     """Get one PersistentVolumeClaim."""
     return get_pvc_data(namespace, pvc_name)
+
 
 # --- MCP tools: config maps / service accounts ---
 @mcp.tool()
@@ -1973,20 +2562,24 @@ def list_config_maps(namespace: str) -> Dict[str, Any]:
     """List ConfigMaps in a namespace with their data. May contain sensitive values."""
     return list_config_maps_data(namespace)
 
+
 @mcp.tool()
 def get_config_map(namespace: str, config_map_name: str) -> Dict[str, Any]:
     """Get one ConfigMap including its data keys and values."""
     return get_config_map_data(namespace, config_map_name)
+
 
 @mcp.tool()
 def list_service_accounts(namespace: str) -> Dict[str, Any]:
     """List ServiceAccounts in a namespace."""
     return list_service_accounts_data(namespace)
 
+
 @mcp.tool()
 def get_service_account(namespace: str, service_account_name: str) -> Dict[str, Any]:
     """Get one ServiceAccount with secret refs."""
     return get_service_account_data(namespace, service_account_name)
+
 
 # --- MCP tools: quotas / limits ---
 @mcp.tool()
@@ -1994,15 +2587,18 @@ def list_resource_quotas(namespace: str) -> Dict[str, Any]:
     """List ResourceQuotas in a namespace showing hard limits and current usage."""
     return list_resource_quotas_data(namespace)
 
+
 @mcp.tool()
 def get_resource_quota(namespace: str, resource_quota_name: str) -> Dict[str, Any]:
     """Get one ResourceQuota with hard limits and usage."""
     return get_resource_quota_data(namespace, resource_quota_name)
 
+
 @mcp.tool()
 def list_limit_ranges(namespace: str) -> Dict[str, Any]:
     """List LimitRanges in a namespace."""
     return list_limit_ranges_data(namespace)
+
 
 # --- MCP tools: jobs / cronjobs ---
 @mcp.tool()
@@ -2010,31 +2606,43 @@ def list_jobs(namespace: str) -> Dict[str, Any]:
     """List Kubernetes Jobs in a namespace."""
     return list_jobs_data(namespace)
 
+
 @mcp.tool()
 def get_job(namespace: str, job_name: str) -> Dict[str, Any]:
     """Get one Kubernetes Job."""
     return get_job_data(namespace, job_name)
+
 
 @mcp.tool()
 def list_cronjobs(namespace: str) -> Dict[str, Any]:
     """List Kubernetes CronJobs in a namespace."""
     return list_cronjobs_data(namespace)
 
+
 @mcp.tool()
 def get_cronjob(namespace: str, cronjob_name: str) -> Dict[str, Any]:
     """Get one Kubernetes CronJob."""
     return get_cronjob_data(namespace, cronjob_name)
 
+
 # --- MCP tools: RBAC ---
 @mcp.tool()
 def list_rbac(namespace: str) -> Dict[str, Any]:
     """List Roles and RoleBindings in a namespace."""
-    return {"roles": list_roles_data(namespace), "role_bindings": list_role_bindings_data(namespace)}
+    return {
+        "roles": list_roles_data(namespace),
+        "role_bindings": list_role_bindings_data(namespace),
+    }
+
 
 @mcp.tool()
 def list_cluster_rbac() -> Dict[str, Any]:
     """List ClusterRoles and ClusterRoleBindings."""
-    return {"cluster_roles": list_cluster_roles_data(), "cluster_role_bindings": list_cluster_role_bindings_data()}
+    return {
+        "cluster_roles": list_cluster_roles_data(),
+        "cluster_role_bindings": list_cluster_role_bindings_data(),
+    }
+
 
 # --- MCP tools: OpenShift routes ---
 @mcp.tool()
@@ -2042,10 +2650,12 @@ def list_routes(namespace: str) -> Dict[str, Any]:
     """List OpenShift Routes in a namespace."""
     return list_routes_data(namespace)
 
+
 @mcp.tool()
 def get_route(namespace: str, route_name: str) -> Dict[str, Any]:
     """Get one OpenShift Route."""
     return get_route_data(namespace, route_name)
+
 
 # --- MCP tools: OpenShift projects ---
 @mcp.tool()
@@ -2053,10 +2663,12 @@ def list_projects() -> Dict[str, Any]:
     """List OpenShift Projects (cluster-wide) with display name and status."""
     return list_projects_data()
 
+
 @mcp.tool()
 def get_project(project_name: str) -> Dict[str, Any]:
     """Get one OpenShift Project."""
     return get_project_data(project_name)
+
 
 # --- MCP tools: OpenShift DeploymentConfigs ---
 @mcp.tool()
@@ -2064,15 +2676,18 @@ def list_deployment_configs(namespace: str) -> Dict[str, Any]:
     """List OpenShift DeploymentConfigs in a namespace."""
     return list_deployment_configs_data(namespace)
 
+
 @mcp.tool()
 def get_deployment_config(namespace: str, dc_name: str) -> Dict[str, Any]:
     """Get one OpenShift DeploymentConfig with replica and trigger info."""
     return get_deployment_config_data(namespace, dc_name)
 
+
 @mcp.tool()
 def rollout_restart_deployment_config(namespace: str, dc_name: str) -> Dict[str, Any]:
     """Trigger a new rollout for an OpenShift DeploymentConfig."""
     return rollout_restart_deployment_config_data(namespace, dc_name)
+
 
 # --- MCP tools: OpenShift builds ---
 @mcp.tool()
@@ -2080,20 +2695,24 @@ def list_build_configs(namespace: str) -> Dict[str, Any]:
     """List OpenShift BuildConfigs in a namespace."""
     return list_build_configs_data(namespace)
 
+
 @mcp.tool()
 def get_build_config(namespace: str, build_config_name: str) -> Dict[str, Any]:
     """Get one OpenShift BuildConfig with source and strategy info."""
     return get_build_config_data(namespace, build_config_name)
+
 
 @mcp.tool()
 def list_builds(namespace: str) -> Dict[str, Any]:
     """List OpenShift Builds in a namespace with phase and timing."""
     return list_builds_data(namespace)
 
+
 @mcp.tool()
 def get_build(namespace: str, build_name: str) -> Dict[str, Any]:
     """Get one OpenShift Build with phase, output image and duration."""
     return get_build_data(namespace, build_name)
+
 
 # --- MCP tools: OpenShift image streams ---
 @mcp.tool()
@@ -2101,10 +2720,12 @@ def list_image_streams(namespace: str) -> Dict[str, Any]:
     """List OpenShift ImageStreams in a namespace."""
     return list_image_streams_data(namespace)
 
+
 @mcp.tool()
 def get_image_stream(namespace: str, image_stream_name: str) -> Dict[str, Any]:
     """Get one OpenShift ImageStream with tags and repository info."""
     return get_image_stream_data(namespace, image_stream_name)
+
 
 # --- MCP tools: OpenShift security ---
 @mcp.tool()
@@ -2112,10 +2733,12 @@ def list_security_context_constraints() -> Dict[str, Any]:
     """List OpenShift SecurityContextConstraints (cluster-wide)."""
     return list_sccs_data()
 
+
 @mcp.tool()
 def get_security_context_constraint(scc_name: str) -> Dict[str, Any]:
     """Get one OpenShift SecurityContextConstraint with privilege and volume settings."""
     return get_scc_data(scc_name)
+
 
 # --- MCP tools: OpenShift users / groups ---
 @mcp.tool()
@@ -2123,20 +2746,24 @@ def list_users() -> Dict[str, Any]:
     """List OpenShift Users with identities and group memberships."""
     return list_users_data()
 
+
 @mcp.tool()
 def get_user(user_name: str) -> Dict[str, Any]:
     """Get one OpenShift User."""
     return get_user_data(user_name)
+
 
 @mcp.tool()
 def list_groups() -> Dict[str, Any]:
     """List OpenShift Groups with their members."""
     return list_groups_data()
 
+
 @mcp.tool()
 def get_group(group_name: str) -> Dict[str, Any]:
     """Get one OpenShift Group with its user list."""
     return get_group_data(group_name)
+
 
 # --- MCP tools: OpenShift cluster version / operators ---
 @mcp.tool()
@@ -2144,15 +2771,18 @@ def get_cluster_version() -> Dict[str, Any]:
     """Get OpenShift cluster version, channel, available updates and conditions."""
     return get_cluster_version_data()
 
+
 @mcp.tool()
 def list_cluster_operators() -> Dict[str, Any]:
     """List all OpenShift ClusterOperators with available/progressing/degraded status."""
     return list_cluster_operators_data()
 
+
 @mcp.tool()
 def get_cluster_operator(operator_name: str) -> Dict[str, Any]:
     """Get one OpenShift ClusterOperator with conditions and version."""
     return get_cluster_operator_data(operator_name)
+
 
 # --- MCP tools: Machine Config ---
 @mcp.tool()
@@ -2160,10 +2790,12 @@ def list_machine_config_pools() -> Dict[str, Any]:
     """List MachineConfigPools showing node counts and update/degraded status."""
     return list_machine_config_pools_data()
 
+
 @mcp.tool()
 def get_machine_config_pool(pool_name: str) -> Dict[str, Any]:
     """Get one MachineConfigPool with counts and update conditions."""
     return get_machine_config_pool_data(pool_name)
+
 
 # --- MCP tools: Machine API ---
 @mcp.tool()
@@ -2171,10 +2803,12 @@ def list_machines(namespace: str = "openshift-machine-api") -> Dict[str, Any]:
     """List Machines in the Machine API namespace (default: openshift-machine-api)."""
     return list_machines_data(namespace)
 
+
 @mcp.tool()
 def list_machine_sets(namespace: str = "openshift-machine-api") -> Dict[str, Any]:
     """List MachineSets in the Machine API namespace."""
     return list_machine_sets_data(namespace)
+
 
 # --- MCP tools: OLM ---
 @mcp.tool()
@@ -2182,15 +2816,18 @@ def list_olm_subscriptions(namespace: str) -> Dict[str, Any]:
     """List OLM Subscriptions in a namespace showing channel and install state."""
     return list_subscriptions_data(namespace)
 
+
 @mcp.tool()
 def list_installed_operators(namespace: str) -> Dict[str, Any]:
     """List installed operators (ClusterServiceVersions) in a namespace with phase."""
     return list_installed_operators_data(namespace)
 
+
 @mcp.tool()
 def list_catalog_sources(namespace: str = "openshift-marketplace") -> Dict[str, Any]:
     """List OLM CatalogSources (default namespace: openshift-marketplace)."""
     return list_catalog_sources_data(namespace)
+
 
 # --- MCP tools: KubeVirt ---
 @mcp.tool()
@@ -2198,85 +2835,106 @@ def list_virtualmachines(namespace: str) -> Dict[str, Any]:
     """List KubeVirt VirtualMachines in a namespace."""
     return list_virtualmachines_data(namespace)
 
+
 @mcp.tool()
 def get_virtualmachine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Get one KubeVirt VirtualMachine with running state and status."""
     return get_virtualmachine_data(namespace, vm_name)
+
 
 @mcp.tool()
 def list_virtual_machine_instances(namespace: str) -> Dict[str, Any]:
     """List running KubeVirt VirtualMachineInstances in a namespace."""
     return list_vmis_data(namespace)
 
+
 @mcp.tool()
 def get_virtual_machine_instance(namespace: str, vmi_name: str) -> Dict[str, Any]:
     """Get one KubeVirt VirtualMachineInstance with phase, node and IP info."""
     return get_vmi_data(namespace, vmi_name)
+
 
 @mcp.tool()
 def start_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Start a stopped KubeVirt VirtualMachine."""
     return _vm_power_action(namespace, vm_name, "start")
 
+
 @mcp.tool()
 def stop_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Stop a running KubeVirt VirtualMachine."""
     return _vm_power_action(namespace, vm_name, "stop")
+
 
 @mcp.tool()
 def restart_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Restart a KubeVirt VirtualMachine."""
     return _vm_power_action(namespace, vm_name, "restart")
 
+
 @mcp.tool()
 def pause_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Pause a running KubeVirt VirtualMachine (different from stop — memory stays in VM)."""
     return pause_virtualmachine_data(namespace, vm_name)
+
 
 @mcp.tool()
 def unpause_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Resume a paused KubeVirt VirtualMachine."""
     return unpause_virtualmachine_data(namespace, vm_name)
 
+
 @mcp.tool()
 def force_reboot_virtual_machine(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Force an immediate reboot of a KubeVirt VirtualMachine without graceful shutdown."""
     return force_reboot_virtualmachine_data(namespace, vm_name)
 
+
 @mcp.tool()
-def clone_virtual_machine(namespace: str, vm_name: str, new_vm_name: str) -> Dict[str, Any]:
+def clone_virtual_machine(
+    namespace: str, vm_name: str, new_vm_name: str
+) -> Dict[str, Any]:
     """Clone a KubeVirt VirtualMachine to a new VM with the same spec."""
     return clone_virtualmachine_data(namespace, vm_name, new_vm_name)
+
 
 @mcp.tool()
 def list_vm_snapshots(namespace: str) -> Dict[str, Any]:
     """List VirtualMachineSnapshots in a namespace."""
     return list_vm_snapshots_data(namespace)
 
+
 @mcp.tool()
-def create_vm_snapshot(namespace: str, vm_name: str, snapshot_name: str) -> Dict[str, Any]:
+def create_vm_snapshot(
+    namespace: str, vm_name: str, snapshot_name: str
+) -> Dict[str, Any]:
     """Create a snapshot of a KubeVirt VirtualMachine."""
     return create_vm_snapshot_data(namespace, vm_name, snapshot_name)
+
 
 @mcp.tool()
 def delete_vm_snapshot(namespace: str, snapshot_name: str) -> Dict[str, Any]:
     """Delete a VirtualMachineSnapshot."""
     return delete_vm_snapshot_data(namespace, snapshot_name)
 
+
 @mcp.tool()
 def list_data_volumes(namespace: str) -> Dict[str, Any]:
     """List DataVolumes (CDI) in a namespace — storage for VMs."""
     return list_data_volumes_data(namespace)
+
 
 @mcp.tool()
 def get_data_volume(namespace: str, data_volume_name: str) -> Dict[str, Any]:
     """Get one DataVolume with import/upload progress and phase."""
     return get_data_volume_data(namespace, data_volume_name)
 
+
 @mcp.tool()
 def get_vm_console(namespace: str, vm_name: str) -> Dict[str, Any]:
     """Get VirtualMachineInstance console access info (VNC/SPICE endpoints and credentials)."""
     return get_vm_console_data(namespace, vm_name)
+
 
 @mcp.tool()
 def list_vm_restores(namespace: str) -> Dict[str, Any]:
@@ -2305,15 +2963,42 @@ app = FastAPI(
 app.mount("/mcp", mcp.streamable_http_app())
 
 
+@app.exception_handler(MaxRetryError)
+async def max_retry_error_handler(request: Request, exc: MaxRetryError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Kubernetes cluster is not available"},
+    )
+
+
+@app.exception_handler(NewConnectionError)
+async def new_connection_error_handler(request: Request, exc: NewConnectionError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Kubernetes cluster is not available"},
+    )
+
+
 @app.middleware("http")
 async def require_authentication(request: Request, call_next):
-    if any(request.url.path.startswith(p) for p in AUTH_PROTECTED_PREFIXES) and not is_authorized_request(request):
+    if any(
+        request.url.path.startswith(p) for p in AUTH_PROTECTED_PREFIXES
+    ) and not is_authorized_request(request):
         return JSONResponse(
             status_code=401,
             content={"detail": "Missing or invalid authentication token"},
             headers={"WWW-Authenticate": 'Bearer realm="mcp-openshift"'},
         )
     return await call_next(request)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 
 @app.get("/")
@@ -2337,6 +3022,8 @@ def health():
 
 @app.get("/readyz")
 def ready():
+    if not K8S_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Kubernetes client not configured")
     try:
         core_v1.get_api_resources()
         return {"status": "ready"}
@@ -2348,446 +3035,577 @@ def ready():
 # REST endpoints
 # ============================================================
 
+
 # Namespaces
 @app.get("/api/v1/namespaces")
 def rest_list_namespaces():
     return list_namespaces_data()
 
+
 @app.get("/api/v1/namespaces/{namespace}")
 def rest_get_namespace(namespace: str):
     return get_namespace_data(namespace)
+
 
 # Nodes
 @app.get("/api/v1/nodes")
 def rest_list_nodes(label_selector: Optional[str] = None):
     return list_nodes_data(label_selector)
 
+
 @app.get("/api/v1/nodes/{node_name}")
 def rest_get_node(node_name: str):
     return get_node_data(node_name)
+
 
 # Pods
 @app.get("/api/v1/namespaces/{namespace}/pods")
 def rest_list_pods(namespace: str, label_selector: Optional[str] = None):
     return list_pods_data(namespace, label_selector)
 
+
 @app.get("/api/v1/namespaces/{namespace}/pods/{pod_name}")
 def rest_get_pod(namespace: str, pod_name: str):
     return get_pod_data(namespace, pod_name)
 
+
 @app.delete("/api/v1/namespaces/{namespace}/pods/{pod_name}")
-def rest_delete_pod(namespace: str, pod_name: str, options: Optional[DeleteOptions] = Body(default=None)):
+def rest_delete_pod(
+    namespace: str, pod_name: str, options: Optional[DeleteOptions] = Body(default=None)
+):
     return delete_pod_data(namespace, pod_name, options)
+
 
 @app.get("/api/v1/namespaces/{namespace}/pods/{pod_name}/logs")
 def rest_get_pod_logs(
-    namespace: str, pod_name: str,
+    namespace: str,
+    pod_name: str,
     container: Optional[str] = None,
     tail_lines: int = Query(default=200, ge=1, le=10000),
     since_seconds: Optional[int] = Query(default=None, ge=1),
     previous: bool = False,
 ):
-    return get_pod_logs_data(namespace, pod_name, LogQuery(container=container, tail_lines=tail_lines, since_seconds=since_seconds, previous=previous))
+    return get_pod_logs_data(
+        namespace,
+        pod_name,
+        LogQuery(
+            container=container,
+            tail_lines=tail_lines,
+            since_seconds=since_seconds,
+            previous=previous,
+        ),
+    )
+
 
 @app.get("/api/v1/namespaces/{namespace}/pods/{pod_name}/events")
 def rest_list_pod_events(namespace: str, pod_name: str):
     return list_events_data(namespace, pod_name, "Pod")
 
+
 @app.get("/api/v1/namespaces/{namespace}/containers")
 def rest_list_containers(namespace: str, label_selector: Optional[str] = None):
     return list_containers_data(namespace, label_selector)
 
+
 @app.get("/api/v1/namespaces/{namespace}/events")
-def rest_list_events(namespace: str, involved_object_name: Optional[str] = None, involved_object_kind: Optional[str] = None):
+def rest_list_events(
+    namespace: str,
+    involved_object_name: Optional[str] = None,
+    involved_object_kind: Optional[str] = None,
+):
     return list_events_data(namespace, involved_object_name, involved_object_kind)
+
 
 # Services
 @app.get("/api/v1/namespaces/{namespace}/services")
 def rest_list_services(namespace: str):
     return list_services_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/services/{service_name}")
 def rest_get_service(namespace: str, service_name: str):
     return get_service_data(namespace, service_name)
+
 
 # Storage
 @app.get("/api/v1/persistentvolumes")
 def rest_list_pvs():
     return list_persistent_volumes_data()
 
+
 @app.get("/api/v1/persistentvolumes/{pv_name}")
 def rest_get_pv(pv_name: str):
     return get_persistent_volume_data(pv_name)
+
 
 @app.get("/api/v1/storageclasses")
 def rest_list_storage_classes():
     return list_storage_classes_data()
 
+
 @app.get("/api/v1/namespaces/{namespace}/persistentvolumeclaims")
 def rest_list_pvcs(namespace: str):
     return list_pvcs_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/persistentvolumeclaims/{pvc_name}")
 def rest_get_pvc(namespace: str, pvc_name: str):
     return get_pvc_data(namespace, pvc_name)
+
 
 # ConfigMaps
 @app.get("/api/v1/namespaces/{namespace}/configmaps")
 def rest_list_config_maps(namespace: str):
     return list_config_maps_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/configmaps/{cm_name}")
 def rest_get_config_map(namespace: str, cm_name: str):
     return get_config_map_data(namespace, cm_name)
+
 
 # ServiceAccounts
 @app.get("/api/v1/namespaces/{namespace}/serviceaccounts")
 def rest_list_service_accounts(namespace: str):
     return list_service_accounts_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/serviceaccounts/{sa_name}")
 def rest_get_service_account(namespace: str, sa_name: str):
     return get_service_account_data(namespace, sa_name)
+
 
 # ResourceQuotas / LimitRanges
 @app.get("/api/v1/namespaces/{namespace}/resourcequotas")
 def rest_list_resource_quotas(namespace: str):
     return list_resource_quotas_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/resourcequotas/{rq_name}")
 def rest_get_resource_quota(namespace: str, rq_name: str):
     return get_resource_quota_data(namespace, rq_name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/limitranges")
 def rest_list_limit_ranges(namespace: str):
     return list_limit_ranges_data(namespace)
+
 
 # Deployments
 @app.get("/api/v1/namespaces/{namespace}/deployments")
 def rest_list_deployments(namespace: str, label_selector: Optional[str] = None):
     return list_deployments_data(namespace, label_selector)
 
+
 @app.get("/api/v1/namespaces/{namespace}/deployments/{deployment_name}")
 def rest_get_deployment(namespace: str, deployment_name: str):
     return get_deployment_data(namespace, deployment_name)
 
-@app.post("/api/v1/namespaces/{namespace}/deployments/{deployment_name}/rollout/restart")
+
+@app.post(
+    "/api/v1/namespaces/{namespace}/deployments/{deployment_name}/rollout/restart"
+)
 def rest_rollout_restart_deployment(namespace: str, deployment_name: str):
     return rollout_restart_deployment_data(namespace, deployment_name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/deployments/{deployment_name}/rollout/status")
 def rest_get_deployment_rollout_status(namespace: str, deployment_name: str):
     return get_deployment_data(namespace, deployment_name)
 
+
 @app.post("/api/v1/namespaces/{namespace}/deployments/{deployment_name}/scale")
 def rest_scale_deployment(namespace: str, deployment_name: str, body: ScaleRequest):
     return scale_deployment_data(namespace, deployment_name, body.replicas)
 
-@app.patch("/api/v1/namespaces/{namespace}/deployments/{deployment_name}/containers/{container_name}/resources")
-def rest_update_deployment_container_resources(namespace: str, deployment_name: str, container_name: str, resources: ResourceRequirementsPatch):
-    return update_deployment_container_resources_data(namespace, deployment_name, container_name, resources)
+
+@app.patch(
+    "/api/v1/namespaces/{namespace}/deployments/{deployment_name}/containers/{container_name}/resources"
+)
+def rest_update_deployment_container_resources(
+    namespace: str,
+    deployment_name: str,
+    container_name: str,
+    resources: ResourceRequirementsPatch,
+):
+    return update_deployment_container_resources_data(
+        namespace, deployment_name, container_name, resources
+    )
+
 
 # StatefulSets
 @app.get("/api/v1/namespaces/{namespace}/statefulsets")
 def rest_list_statefulsets(namespace: str, label_selector: Optional[str] = None):
     return list_statefulsets_data(namespace, label_selector)
 
+
 @app.get("/api/v1/namespaces/{namespace}/statefulsets/{name}")
 def rest_get_statefulset(namespace: str, name: str):
     return get_statefulset_data(namespace, name)
+
 
 @app.post("/api/v1/namespaces/{namespace}/statefulsets/{name}/rollout/restart")
 def rest_rollout_restart_statefulset(namespace: str, name: str):
     return rollout_restart_statefulset_data(namespace, name)
 
+
 @app.post("/api/v1/namespaces/{namespace}/statefulsets/{name}/scale")
 def rest_scale_statefulset(namespace: str, name: str, body: ScaleRequest):
     return scale_statefulset_data(namespace, name, body.replicas)
+
 
 # DaemonSets / ReplicaSets
 @app.get("/api/v1/namespaces/{namespace}/daemonsets")
 def rest_list_daemonsets(namespace: str, label_selector: Optional[str] = None):
     return list_daemonsets_data(namespace, label_selector)
 
+
 @app.get("/api/v1/namespaces/{namespace}/daemonsets/{name}")
 def rest_get_daemonset(namespace: str, name: str):
     return get_daemonset_data(namespace, name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/replicasets")
 def rest_list_replicasets(namespace: str, label_selector: Optional[str] = None):
     return list_replicasets_data(namespace, label_selector)
+
 
 # HPAs
 @app.get("/api/v1/namespaces/{namespace}/hpas")
 def rest_list_hpas(namespace: str):
     return list_hpas_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/hpas/{name}")
 def rest_get_hpa(namespace: str, name: str):
     return get_hpa_data(namespace, name)
+
 
 # Ingresses / NetworkPolicies
 @app.get("/api/v1/namespaces/{namespace}/ingresses")
 def rest_list_ingresses(namespace: str):
     return list_ingresses_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/ingresses/{name}")
 def rest_get_ingress(namespace: str, name: str):
     return get_ingress_data(namespace, name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/networkpolicies")
 def rest_list_network_policies(namespace: str):
     return list_network_policies_data(namespace)
+
 
 # Jobs / CronJobs
 @app.get("/api/v1/namespaces/{namespace}/jobs")
 def rest_list_jobs(namespace: str):
     return list_jobs_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/jobs/{job_name}")
 def rest_get_job(namespace: str, job_name: str):
     return get_job_data(namespace, job_name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/cronjobs")
 def rest_list_cronjobs(namespace: str):
     return list_cronjobs_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/cronjobs/{cronjob_name}")
 def rest_get_cronjob(namespace: str, cronjob_name: str):
     return get_cronjob_data(namespace, cronjob_name)
+
 
 # RBAC
 @app.get("/api/v1/namespaces/{namespace}/rbac/roles")
 def rest_list_roles(namespace: str):
     return list_roles_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/rbac/roles/{role_name}")
 def rest_get_role(namespace: str, role_name: str):
     return get_role_data(namespace, role_name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/rbac/rolebindings")
 def rest_list_role_bindings(namespace: str):
     return list_role_bindings_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/rbac/rolebindings/{role_binding_name}")
 def rest_get_role_binding(namespace: str, role_binding_name: str):
     return get_role_binding_data(namespace, role_binding_name)
+
 
 @app.get("/api/v1/rbac/clusterroles")
 def rest_list_cluster_roles():
     return list_cluster_roles_data()
 
+
 @app.get("/api/v1/rbac/clusterroles/{cluster_role_name}")
 def rest_get_cluster_role(cluster_role_name: str):
     return get_cluster_role_data(cluster_role_name)
+
 
 @app.get("/api/v1/rbac/clusterrolebindings")
 def rest_list_cluster_role_bindings():
     return list_cluster_role_bindings_data()
 
+
 @app.get("/api/v1/rbac/clusterrolebindings/{cluster_role_binding_name}")
 def rest_get_cluster_role_binding(cluster_role_binding_name: str):
     return get_cluster_role_binding_data(cluster_role_binding_name)
+
 
 # OpenShift routes
 @app.get("/api/v1/namespaces/{namespace}/routes")
 def rest_list_routes(namespace: str):
     return list_routes_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/routes/{route_name}")
 def rest_get_route(namespace: str, route_name: str):
     return get_route_data(namespace, route_name)
+
 
 # OpenShift projects
 @app.get("/api/v1/projects")
 def rest_list_projects():
     return list_projects_data()
 
+
 @app.get("/api/v1/projects/{project_name}")
 def rest_get_project(project_name: str):
     return get_project_data(project_name)
+
 
 # OpenShift DeploymentConfigs
 @app.get("/api/v1/namespaces/{namespace}/deploymentconfigs")
 def rest_list_deployment_configs(namespace: str):
     return list_deployment_configs_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/deploymentconfigs/{name}")
 def rest_get_deployment_config(namespace: str, name: str):
     return get_deployment_config_data(namespace, name)
 
+
 @app.post("/api/v1/namespaces/{namespace}/deploymentconfigs/{name}/rollout/restart")
 def rest_rollout_restart_deployment_config(namespace: str, name: str):
     return rollout_restart_deployment_config_data(namespace, name)
+
 
 # OpenShift builds
 @app.get("/api/v1/namespaces/{namespace}/buildconfigs")
 def rest_list_build_configs(namespace: str):
     return list_build_configs_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/buildconfigs/{name}")
 def rest_get_build_config(namespace: str, name: str):
     return get_build_config_data(namespace, name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/builds")
 def rest_list_builds(namespace: str):
     return list_builds_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/builds/{name}")
 def rest_get_build(namespace: str, name: str):
     return get_build_data(namespace, name)
+
 
 # OpenShift image streams
 @app.get("/api/v1/namespaces/{namespace}/imagestreams")
 def rest_list_image_streams(namespace: str):
     return list_image_streams_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/imagestreams/{name}")
 def rest_get_image_stream(namespace: str, name: str):
     return get_image_stream_data(namespace, name)
+
 
 # OpenShift SCCs / users / groups
 @app.get("/api/v1/securitycontextconstraints")
 def rest_list_sccs():
     return list_sccs_data()
 
+
 @app.get("/api/v1/securitycontextconstraints/{name}")
 def rest_get_scc(name: str):
     return get_scc_data(name)
+
 
 @app.get("/api/v1/users")
 def rest_list_users():
     return list_users_data()
 
+
 @app.get("/api/v1/users/{name}")
 def rest_get_user(name: str):
     return get_user_data(name)
+
 
 @app.get("/api/v1/groups")
 def rest_list_groups():
     return list_groups_data()
 
+
 @app.get("/api/v1/groups/{name}")
 def rest_get_group(name: str):
     return get_group_data(name)
+
 
 # OpenShift cluster version / operators
 @app.get("/api/v1/clusterversion")
 def rest_get_cluster_version():
     return get_cluster_version_data()
 
+
 @app.get("/api/v1/clusteroperators")
 def rest_list_cluster_operators():
     return list_cluster_operators_data()
 
+
 @app.get("/api/v1/clusteroperators/{name}")
 def rest_get_cluster_operator(name: str):
     return get_cluster_operator_data(name)
+
 
 # Machine Config
 @app.get("/api/v1/machineconfigpools")
 def rest_list_machine_config_pools():
     return list_machine_config_pools_data()
 
+
 @app.get("/api/v1/machineconfigpools/{name}")
 def rest_get_machine_config_pool(name: str):
     return get_machine_config_pool_data(name)
+
 
 # Machine API
 @app.get("/api/v1/namespaces/{namespace}/machines")
 def rest_list_machines(namespace: str):
     return list_machines_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/machinesets")
 def rest_list_machine_sets(namespace: str):
     return list_machine_sets_data(namespace)
+
 
 # OLM
 @app.get("/api/v1/namespaces/{namespace}/subscriptions")
 def rest_list_subscriptions(namespace: str):
     return list_subscriptions_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/clusterserviceversions")
 def rest_list_installed_operators(namespace: str):
     return list_installed_operators_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/catalogsources")
 def rest_list_catalog_sources(namespace: str):
     return list_catalog_sources_data(namespace)
+
 
 # KubeVirt
 @app.get("/api/v1/namespaces/{namespace}/virtualmachines")
 def rest_list_vms(namespace: str):
     return list_virtualmachines_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}")
 def rest_get_vm(namespace: str, vm_name: str):
     return get_virtualmachine_data(namespace, vm_name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/virtualmachineinstances")
 def rest_list_vmis(namespace: str):
     return list_vmis_data(namespace)
 
+
 @app.get("/api/v1/namespaces/{namespace}/virtualmachineinstances/{vmi_name}")
 def rest_get_vmi(namespace: str, vmi_name: str):
     return get_vmi_data(namespace, vmi_name)
+
 
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/start")
 def rest_start_vm(namespace: str, vm_name: str):
     return _vm_power_action(namespace, vm_name, "start")
 
+
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/stop")
 def rest_stop_vm(namespace: str, vm_name: str):
     return _vm_power_action(namespace, vm_name, "stop")
+
 
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/restart")
 def rest_restart_vm(namespace: str, vm_name: str):
     return _vm_power_action(namespace, vm_name, "restart")
 
+
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/pause")
 def rest_pause_vm(namespace: str, vm_name: str):
     return pause_virtualmachine_data(namespace, vm_name)
+
 
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/unpause")
 def rest_unpause_vm(namespace: str, vm_name: str):
     return unpause_virtualmachine_data(namespace, vm_name)
 
+
 @app.put("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/reboot")
 def rest_force_reboot_vm(namespace: str, vm_name: str):
     return force_reboot_virtualmachine_data(namespace, vm_name)
+
 
 @app.post("/api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/clone")
 def rest_clone_vm(namespace: str, vm_name: str, body: Dict[str, str] = Body(...)):
     new_vm_name = body.get("new_vm_name", f"{vm_name}-clone")
     return clone_virtualmachine_data(namespace, vm_name, new_vm_name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/virtualmachinesnapshots")
 def rest_list_vm_snapshots(namespace: str):
     return list_vm_snapshots_data(namespace)
+
 
 @app.post("/api/v1/namespaces/{namespace}/virtualmachinesnapshots")
 def rest_create_vm_snapshot(namespace: str, body: Dict[str, str] = Body(...)):
     vm_name = body.get("vm_name")
     snapshot_name = body.get("snapshot_name")
     if not vm_name or not snapshot_name:
-        raise HTTPException(status_code=400, detail="vm_name and snapshot_name required")
+        raise HTTPException(
+            status_code=400, detail="vm_name and snapshot_name required"
+        )
     return create_vm_snapshot_data(namespace, vm_name, snapshot_name)
+
 
 @app.delete("/api/v1/namespaces/{namespace}/virtualmachinesnapshots/{snapshot_name}")
 def rest_delete_vm_snapshot(namespace: str, snapshot_name: str):
     return delete_vm_snapshot_data(namespace, snapshot_name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/datavolumes")
 def rest_list_data_volumes(namespace: str):
     return list_data_volumes_data(namespace)
+
 
 @app.get("/api/v1/namespaces/{namespace}/datavolumes/{dv_name}")
 def rest_get_data_volume(namespace: str, dv_name: str):
     return get_data_volume_data(namespace, dv_name)
 
+
 @app.get("/api/v1/namespaces/{namespace}/virtualmachineinstances/{vmi_name}/console")
 def rest_get_vm_console(namespace: str, vmi_name: str):
     return get_vm_console_data(namespace, vmi_name)
+
 
 @app.get("/api/v1/namespaces/{namespace}/virtualmachinerestores")
 def rest_list_vm_restores(namespace: str):

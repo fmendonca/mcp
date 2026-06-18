@@ -6,8 +6,8 @@ replicaCount: 1
 
 image:
   repository: quay.io/fcalomen/mcp
-  tag: "openshift-0.3.0"
-  pullPolicy: Always
+  tag: "openshift-0.3.1"
+  pullPolicy: IfNotPresent
 
 nameOverride: ""
 fullnameOverride: ""
@@ -25,13 +25,11 @@ auth:
 
 mcp:
   allowedHosts:
-    - mcp-openshift-mcp-server.apps.sno.openocp.com
-    - mcp-openshift-mcp-server.apps.sno.openocp.com:*
+    # Add your allowed hostnames here (e.g., "mcp.example.com", "*.apps.cluster.openshift.com:*")
     - 127.0.0.1:*
     - localhost:*
   allowedOrigins:
-    - https://mcp-openshift-mcp-server.apps.sno.openocp.com
-    - https://mcp-openshift-mcp-server.apps.sno.openocp.com:*
+    # Add your allowed origins here (e.g., "https://console.example.com", "https://*.apps.cluster.openshift.com:*")
     - http://127.0.0.1:*
     - http://localhost:*
 
@@ -57,10 +55,15 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-podSecurityContext: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL

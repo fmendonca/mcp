@@ -2,7 +2,14 @@
 # Build and push multi-arch (arm64 + amd64) image to quay.io/fcalomen/mcp
 set -euo pipefail
 
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-0.3.1}"
+
+# Validate version format
+if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "ERROR: Invalid VERSION format (use X.Y.Z)" >&2
+  exit 1
+fi
+
 REGISTRY="quay.io/fcalomen"
 IMAGE="${REGISTRY}/mcp:openshift-${VERSION}"
 ARM_TAG="${IMAGE}-arm64"

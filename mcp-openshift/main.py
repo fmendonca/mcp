@@ -13,6 +13,7 @@ from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 APP_VERSION = "0.3.1"
 
@@ -2960,6 +2961,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/mcp", mcp.streamable_http_app())
+
+
+@app.exception_handler(MaxRetryError)
+async def max_retry_error_handler(request: Request, exc: MaxRetryError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Kubernetes cluster is not available"},
+    )
+
+
+@app.exception_handler(NewConnectionError)
+async def new_connection_error_handler(request: Request, exc: NewConnectionError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Kubernetes cluster is not available"},
+    )
 
 
 @app.middleware("http")

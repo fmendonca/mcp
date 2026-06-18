@@ -20,13 +20,13 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 
 ```bash
 # UBI9 — latest release (auto-updated on every merge to main)
-docker pull ghcr.io/fmendonca/mcp-openshift:latest
+podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-docker pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
 
 # Alpine
-docker pull quay.io/fcalomen/mcp:openshift-0.3.1
+podman pull quay.io/fcalomen/mcp:openshift-0.3.1
 ```
 
 ---
@@ -125,12 +125,12 @@ The server automatically uses:
 
 ## Quick Start
 
-### Run with Docker / Podman
+### Run with Podman
 
 ```bash
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 
-docker run -d \
+podman run -d \
   --name mcp-openshift \
   -e MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
   -e KUBECONFIG=/kube/config \
@@ -162,15 +162,17 @@ Endpoints:
 
 ## Build images locally
 
-### UBI9 (requires Docker or Podman with buildx)
+### UBI9 (multi-arch via Podman)
 
 ```bash
 cd mcp-openshift
-docker buildx build \
+podman build \
   --platform linux/amd64,linux/arm64 \
+  --manifest ghcr.io/fmendonca/mcp-openshift:dev \
   -f Dockerfile.ubi9 \
-  -t ghcr.io/fmendonca/mcp-openshift:dev \
-  --push .
+  .
+podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
+  docker://ghcr.io/fmendonca/mcp-openshift:dev
 ```
 
 ### Alpine (multi-arch via Podman)

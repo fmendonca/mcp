@@ -16,10 +16,10 @@ Images are published to **GitHub Container Registry (GHCR)** and updated on ever
 
 ```bash
 # Pull latest UBI9 image (recommended)
-docker pull ghcr.io/fmendonca/mcp-openshift:latest
+podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # Pull a specific version
-docker pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
 ```
 
 > An Alpine-based image is also available on `quay.io/fcalomen/mcp:openshift-<version>` for users who prefer a minimal footprint.

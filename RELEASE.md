@@ -87,7 +87,7 @@ If you need to release a specific version without auto-increment:
 | `packages: write` | Push images to `ghcr.io` | Defined in `release.yml` permissions block |
 | `contents: write` | Create git tags + releases | Defined in `release.yml` permissions block |
 
-No external secrets (Quay, Docker Hub) are needed for the GHCR-based workflow.
+No external secrets (Quay.io, Docker Hub) are needed for the GHCR-based workflow — only the automatic `GITHUB_TOKEN`.
 
 ---
 

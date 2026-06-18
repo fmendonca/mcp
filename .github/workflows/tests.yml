@@ -134,7 +134,7 @@ jobs:
 
       - name: Lint Helm chart
         working-directory: mcp-openshift
-        run: helm lint charts/mcp-openshift/ -v
+        run: helm lint charts/mcp-openshift/ --strict
 
       - name: Template validation
         working-directory: mcp-openshift

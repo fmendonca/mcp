@@ -127,17 +127,26 @@ class ScaleRequest(BaseModel):
 
 
 # --- Kubernetes client setup ---
-def configure_kubernetes() -> None:
+def configure_kubernetes() -> bool:
     try:
         config.load_incluster_config()
+        return True
     except config.ConfigException:
         try:
             config.load_kube_config()
+            return True
         except config.ConfigException:
-            raise RuntimeError("Could not configure kubernetes client")
+            return False
 
 
-configure_kubernetes()
+K8S_AVAILABLE = configure_kubernetes()
+if not K8S_AVAILABLE:
+    import logging as _logging
+
+    _logging.warning(
+        "Could not configure Kubernetes client - API calls will fail until a valid "
+        "kubeconfig or in-cluster config is available"
+    )
 
 core_v1 = client.CoreV1Api()
 apps_v1 = client.AppsV1Api()
@@ -2996,6 +3005,8 @@ def health():
 
 @app.get("/readyz")
 def ready():
+    if not K8S_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Kubernetes client not configured")
     try:
         core_v1.get_api_resources()
         return {"status": "ready"}

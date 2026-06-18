@@ -1,6 +1,8 @@
 FROM alpine:3.21
 
-RUN apk add --no-cache python3 py3-pip && \
+RUN apk add --no-cache \
+    python3=3.12.13-r0 \
+    py3-pip=24.3.1-r0 && \
     pip3 install --no-cache-dir --break-system-packages --upgrade 'pip>=26.1' 'setuptools>=78.1.1' && \
     adduser -D -u 1001 -g mcpuser mcpuser
 

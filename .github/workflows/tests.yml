@@ -141,6 +141,7 @@ jobs:
         run: |
           helm template mcp-openshift charts/mcp-openshift/ \
             --values charts/mcp-openshift/values.yaml \
+            --set auth.token=ci-test-token-placeholder \
             --output-dir /tmp/helm-templates
 
   dockerfile-lint:

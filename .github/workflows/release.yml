@@ -162,10 +162,10 @@ jobs:
 
             ```bash
             # Pull latest
-            docker pull ghcr.io/${{ github.repository_owner }}/mcp-openshift:latest
+            podman pull ghcr.io/${{ github.repository_owner }}/mcp-openshift:latest
 
             # Pull specific version
-            docker pull ghcr.io/${{ github.repository_owner }}/mcp-openshift:${{ needs.version.outputs.tag }}
+            podman pull ghcr.io/${{ github.repository_owner }}/mcp-openshift:${{ needs.version.outputs.tag }}
             ```
 
             **Image digest:** `${{ needs.build-push.outputs.digest }}`
@@ -177,7 +177,7 @@ jobs:
             ```bash
             export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 
-            docker run -d \
+            podman run -d \
               -e MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" \
               -e KUBECONFIG=/kube/config \
               -v ~/.kube:/kube:ro \

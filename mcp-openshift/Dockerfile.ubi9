@@ -25,4 +25,4 @@ LABEL org.opencontainers.image.source="https://github.com/fmendonca/mcp" \
       org.opencontainers.image.description="OpenShift Admin MCP Server — UBI9 variant" \
       org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/python-312"
 
-CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "--app-dir", "/opt/app-root/src", "main:app", "--host", "0.0.0.0", "--port", "8000"]

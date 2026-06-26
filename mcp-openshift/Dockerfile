@@ -30,4 +30,4 @@ LABEL org.opencontainers.image.source="https://github.com/fmendonca/mcp" \
       org.opencontainers.image.version="0.3.1" \
       org.opencontainers.image.created="2026-06-16T00:00:00Z"
 
-CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "--app-dir", "/app", "main:app", "--host", "0.0.0.0", "--port", "8000"]

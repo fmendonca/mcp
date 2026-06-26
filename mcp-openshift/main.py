@@ -1,4 +1,5 @@
 import contextlib
+import inspect
 import os
 import re
 import secrets
@@ -2247,6 +2248,36 @@ def list_vm_restores_data(namespace: str) -> Dict[str, Any]:
 # ============================================================
 # MCP server
 # ============================================================
+MCP_STATELESS_HTTP = True
+MCP_JSON_RESPONSE = True
+MCP_STREAMABLE_HTTP_PATH = "/"
+MCP_TRANSPORT_SECURITY = TransportSecuritySettings(
+    allowed_hosts=csv_env(
+        "MCP_ALLOWED_HOSTS",
+        ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+    ),
+    allowed_origins=csv_env(
+        "MCP_ALLOWED_ORIGINS",
+        ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
+    ),
+)
+
+
+def accepted_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    signature = inspect.signature(callable_obj)
+    parameters = signature.parameters.values()
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters):
+        return kwargs
+    return {k: v for k, v in kwargs.items() if k in signature.parameters}
+
+
+MCP_TRANSPORT_KWARGS = {
+    "stateless_http": MCP_STATELESS_HTTP,
+    "json_response": MCP_JSON_RESPONSE,
+    "streamable_http_path": MCP_STREAMABLE_HTTP_PATH,
+    "transport_security": MCP_TRANSPORT_SECURITY,
+}
+
 mcp = FastMCP(
     "OpenShift Admin Operations",
     instructions=(
@@ -2261,19 +2292,7 @@ mcp = FastMCP(
         "Mutate: restart/scale deployments and statefulsets, delete pods, update resources, "
         "trigger DC rollouts, start/stop/restart VMs."
     ),
-    stateless_http=True,
-    json_response=True,
-    streamable_http_path="/",
-    transport_security=TransportSecuritySettings(
-        allowed_hosts=csv_env(
-            "MCP_ALLOWED_HOSTS",
-            ["127.0.0.1:*", "localhost:*", "[::1]:*"],
-        ),
-        allowed_origins=csv_env(
-            "MCP_ALLOWED_ORIGINS",
-            ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"],
-        ),
-    ),
+    **accepted_kwargs(FastMCP, MCP_TRANSPORT_KWARGS),
 )
 
 
@@ -2951,6 +2970,12 @@ async def lifespan(_: FastAPI):
         yield
 
 
+def create_mcp_streamable_http_app():
+    return mcp.streamable_http_app(
+        **accepted_kwargs(mcp.streamable_http_app, MCP_TRANSPORT_KWARGS)
+    )
+
+
 app = FastAPI(
     title="OpenShift Admin MCP Server",
     version=APP_VERSION,
@@ -2960,7 +2985,7 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
-app.mount("/mcp", mcp.streamable_http_app())
+app.mount("/mcp", create_mcp_streamable_http_app())
 
 
 @app.exception_handler(MaxRetryError)

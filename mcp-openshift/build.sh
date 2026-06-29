@@ -36,7 +36,7 @@ case "$(uname -m)" in
 esac
 
 echo "==> Smoke testing ${TEST_TAG} with an arbitrary OpenShift UID"
-podman run --rm --user 1000870000 --entrypoint python3 "${TEST_TAG}" -c \
+podman run --rm --user 12345 --entrypoint python3 "${TEST_TAG}" -c \
   "import os; assert os.access('/app', os.X_OK); assert os.access('/app/main.py', os.R_OK); import main; assert hasattr(main, 'app')"
 
 echo "==> Pushing platform images"

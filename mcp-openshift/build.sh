@@ -23,6 +23,22 @@ echo "    arm64 done: ${ARM_TAG}"
 podman build --platform linux/amd64 -t "${AMD_TAG}" .
 echo "    amd64 done: ${AMD_TAG}"
 
+case "$(uname -m)" in
+  x86_64|amd64)
+    TEST_TAG="${AMD_TAG}"
+    ;;
+  arm64|aarch64)
+    TEST_TAG="${ARM_TAG}"
+    ;;
+  *)
+    TEST_TAG="${AMD_TAG}"
+    ;;
+esac
+
+echo "==> Smoke testing ${TEST_TAG} with an arbitrary OpenShift UID"
+podman run --rm --user 1000870000 --entrypoint python3 "${TEST_TAG}" -c \
+  "import os; assert os.access('/app', os.X_OK); assert os.access('/app/main.py', os.R_OK); import main; assert hasattr(main, 'app')"
+
 echo "==> Pushing platform images"
 podman push "${ARM_TAG}"
 podman push "${AMD_TAG}"

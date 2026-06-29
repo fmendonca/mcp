@@ -13,9 +13,8 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 COPY main.py .
 
-RUN chown -R mcpuser:mcpuser /app && \
-    chmod -R u-w,g-rwx,o-rwx /app && \
-    chmod u+r /app/main.py /app/requirements.txt
+RUN chown -R mcpuser:0 /app && \
+    chmod -R u=rwX,g=rX,o=rX /app
 
 USER 1001
 

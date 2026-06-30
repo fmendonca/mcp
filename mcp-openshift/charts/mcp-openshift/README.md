@@ -6,7 +6,7 @@ Deploys the MCP OpenShift/Kubernetes/KubeVirt operations server to the `mcp-serv
 
 | Chart | App | Default image tag |
 | --- | --- | --- |
-| `0.0.9` | `0.0.9` | `openshift-0.0.9` |
+| `0.0.10` | `0.0.10` | `openshift-0.0.10` |
 
 ## Install
 
@@ -52,7 +52,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | `namespace.name` | `mcp-server` | Namespace used by namespaced resources |
 | `namespace.create` | `false` | Create a Namespace object from the chart. Keep this `false` when using `--create-namespace` or an existing namespace |
 | `image.repository` | `quay.io/fcalomen/mcp` | Container image repository |
-| `image.tag` | `openshift-0.0.9` | Container image tag |
+| `image.tag` | `openshift-0.0.10` | Container image tag |
 | `auth.enabled` | `true` | Set `MCP_AUTH_TOKEN` in the deployment |
 | `auth.token` | empty | Token used to create the chart-managed Secret |
 | `auth.existingSecret` | empty | Existing Secret name containing the token |
@@ -63,7 +63,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 
 ## RBAC scope
 
-The chart grants read access to cluster and namespaced inventory resources, plus narrowly scoped mutating verbs for supported operations. Namespace and OpenShift Project creation require:
+The chart grants operational access for the exposed MCP tools, including broad read-only access for must-gather, namespace/project creation, OLM operator installation and must-gather Jobs. The key mutating permissions are:
 
 ```yaml
 - apiGroups: [""]
@@ -72,4 +72,10 @@ The chart grants read access to cluster and namespaced inventory resources, plus
 - apiGroups: ["project.openshift.io"]
   resources: ["projectrequests"]
   verbs: ["create"]
+- apiGroups: ["operators.coreos.com"]
+  resources: ["subscriptions", "operatorgroups"]
+  verbs: ["create"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "delete"]
 ```

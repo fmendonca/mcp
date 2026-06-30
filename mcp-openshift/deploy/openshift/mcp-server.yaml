@@ -35,6 +35,11 @@ metadata:
     app.kubernetes.io/name: mcp-openshift
     app.kubernetes.io/part-of: mcp-server
 rules:
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+- nonResourceURLs: ["*"]
+  verbs: ["get"]
 - apiGroups: [""]
   resources: ["namespaces", "nodes", "persistentvolumes"]
   verbs: ["get", "list"]
@@ -64,6 +69,9 @@ rules:
 - apiGroups: ["batch"]
   resources: ["jobs", "cronjobs"]
   verbs: ["get", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "delete"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
   verbs: ["get", "list"]
@@ -103,6 +111,13 @@ rules:
 - apiGroups: ["operators.coreos.com"]
   resources: ["subscriptions", "clusterserviceversions", "catalogsources", "installplans"]
   verbs: ["get", "list"]
+- apiGroups: ["operators.coreos.com"]
+  resources: ["subscriptions", "operatorgroups"]
+  verbs: ["create"]
+- apiGroups: ["security.openshift.io"]
+  resources: ["securitycontextconstraints"]
+  resourceNames: ["privileged"]
+  verbs: ["use"]
 - apiGroups: ["kubevirt.io"]
   resources: ["virtualmachines", "virtualmachineinstances"]
   verbs: ["get", "list"]
@@ -153,7 +168,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mcp-openshift
-        image: quay.io/fcalomen/mcp:openshift-0.0.9
+        image: quay.io/fcalomen/mcp:openshift-0.0.10
         imagePullPolicy: Always
         env:
         - name: MCP_ALLOWED_HOSTS

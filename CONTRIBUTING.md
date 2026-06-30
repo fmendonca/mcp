@@ -81,12 +81,12 @@ pip-audit --skip-editable
 ### Build Multi-arch Images
 ```bash
 cd mcp-openshift
-VERSION=0.0.9 ./build.sh
+VERSION=0.0.10 ./build.sh
 ```
 
 ### Build Single Architecture (for testing)
 ```bash
-podman build -t quay.io/fcalomen/mcp:openshift-0.0.9-test .
+podman build -t quay.io/fcalomen/mcp:openshift-0.0.10-test .
 ```
 
 ## Helm Chart Development

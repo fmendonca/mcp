@@ -28,7 +28,7 @@ class TestRootEndpoint:
         response = client.get("/")
         assert response.status_code == 200
         data = response.json()
-        assert data["version"] == "0.0.9"
+        assert data["version"] == "0.0.10"
 
 
 class TestHealthEndpoints:
@@ -173,6 +173,76 @@ class TestCreateEndpoints:
 
         assert response.status_code == 400
         assert "DNS label" in response.json()["detail"]
+
+    def test_install_olm_operator_endpoint(self, client):
+        """Test generic OLM operator installation creates expected resources."""
+        from main import custom_objects
+
+        operator_group_obj = {
+            "metadata": {
+                "name": "app-operators",
+                "namespace": "operators-test",
+                "uid": "uid-og",
+                "labels": {},
+                "annotations": {},
+                "creationTimestamp": None,
+            },
+            "spec": {"targetNamespaces": ["operators-test"]},
+            "status": {"namespaces": ["operators-test"]},
+        }
+        subscription_obj = {
+            "metadata": {
+                "name": "example-operator",
+                "namespace": "operators-test",
+                "uid": "uid-sub",
+                "labels": {},
+                "annotations": {},
+                "creationTimestamp": None,
+            },
+            "spec": {
+                "name": "example-operator",
+                "channel": "stable",
+                "source": "redhat-operators",
+                "sourceNamespace": "openshift-marketplace",
+                "installPlanApproval": "Automatic",
+            },
+            "status": {"state": "UpgradePending"},
+        }
+
+        with patch.object(
+            custom_objects,
+            "create_namespaced_custom_object",
+            side_effect=[operator_group_obj, subscription_obj],
+        ) as create:
+            response = client.post(
+                "/api/v1/operators/install",
+                json={
+                    "namespace": "operators-test",
+                    "package_name": "example-operator",
+                    "create_operator_group": True,
+                    "operator_group_name": "app-operators",
+                    "target_namespaces": ["operators-test"],
+                },
+            )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == "created"
+        assert data["operator_group"]["operator_group"]["name"] == "app-operators"
+        assert data["subscription"]["package"] == "example-operator"
+        assert create.call_count == 2
+        assert create.call_args_list[0].args[:4] == (
+            "operators.coreos.com",
+            "v1",
+            "operators-test",
+            "operatorgroups",
+        )
+        assert create.call_args_list[1].args[:4] == (
+            "operators.coreos.com",
+            "v1alpha1",
+            "operators-test",
+            "subscriptions",
+        )
 
 
 class TestErrorResponses:

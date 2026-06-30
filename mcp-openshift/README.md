@@ -2,9 +2,9 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.0.9
+**Version:** 0.0.10
 **UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`
-**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.9`
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.10`
 
 [![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
 [![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
@@ -23,10 +23,10 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.9
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.10
 
 # Alpine
-podman pull quay.io/fcalomen/mcp:openshift-0.0.9
+podman pull quay.io/fcalomen/mcp:openshift-0.0.10
 ```
 
 ---
@@ -86,9 +86,12 @@ podman pull quay.io/fcalomen/mcp:openshift-0.0.9
 | MachineConfigPools | list, get |
 | Machines | list |
 | MachineSets | list |
-| OLM Subscriptions | list |
+| OLM Operators | install any package through OLM |
+| OLM Subscriptions | list, create |
 | Installed Operators (CSVs) | list |
 | CatalogSources | list |
+| AMQ Streams | install through OLM shortcut |
+| Must-gather | start Job, read logs |
 
 ### KubeVirt
 | Resource | Operations |
@@ -179,7 +182,7 @@ podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
 
 ```bash
 cd mcp-openshift
-VERSION=0.0.9 ./build.sh
+VERSION=0.0.10 ./build.sh
 ```
 
 ---
@@ -278,7 +281,7 @@ codex mcp add openshift \
 | Container | Runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem |
 | Input validation | Resource names validated with regex before reaching the Kubernetes API |
 | Secret exposure | Server never exposes Kubernetes Secret values — only metadata |
-| RBAC | Principle of least privilege — `get`/`list` on sensitive resources, `create` only on namespaces and ProjectRequests, `delete` only on pods, `patch` on workloads for restart/scale |
+| RBAC | Operational RBAC for supported actions, including broad read-only access for must-gather, `create` on namespaces, ProjectRequests, OLM Subscriptions/OperatorGroups, and Jobs |
 | Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` on every response |
 | Error messages | Kubernetes internals never leaked in error responses |
 | CVE scanning | `pip-audit` and `bandit` run on every CI push |
@@ -302,6 +305,12 @@ All endpoints are under `/api/v1`. Full interactive docs at `/docs`.
 Namespace and Project names must be Kubernetes DNS labels, for example
 `teste-calo`. Names with underscores, such as `teste_calo`, are rejected before
 calling the cluster API.
+
+Generic OLM installs use `/api/v1/operators/install` or the MCP tool
+`install_olm_operator`. Provide `package_name`, `channel`, `source`, and
+`source_namespace`; set `create_operator_group=true` when installing into a
+dedicated namespace that does not already have an OperatorGroup. AMQ Streams is
+available as the shortcut `install_amq_streams_operator`.
 
 ```
 GET  /api/v1/namespaces
@@ -360,8 +369,14 @@ GET  /api/v1/machineconfigpools[/{name}]
 GET  /api/v1/namespaces/{namespace}/machines
 GET  /api/v1/namespaces/{namespace}/machinesets
 GET  /api/v1/namespaces/{namespace}/subscriptions
+POST /api/v1/namespaces/{namespace}/subscriptions
 GET  /api/v1/namespaces/{namespace}/clusterserviceversions
 GET  /api/v1/namespaces/{namespace}/catalogsources
+POST /api/v1/namespaces/{namespace}/operatorgroups
+POST /api/v1/operators/install
+POST /api/v1/operators/amq-streams
+POST /api/v1/must-gather
+GET  /api/v1/namespaces/{namespace}/must-gather/{job_name}/logs
 GET  /api/v1/namespaces/{namespace}/virtualmachines[/{vm_name}]
 PUT  /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/start
 PUT  /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/stop

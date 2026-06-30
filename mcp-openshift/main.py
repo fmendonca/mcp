@@ -16,7 +16,7 @@ from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from urllib3.exceptions import MaxRetryError, NewConnectionError
 
-APP_VERSION = "0.0.9"
+APP_VERSION = "0.0.10"
 
 # --- OpenShift / KubeVirt API group constants ---
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"
@@ -54,6 +54,10 @@ MACHINE_CONFIG_VERSION = "v1"
 
 OLM_GROUP = "operators.coreos.com"
 OLM_VERSION = "v1alpha1"
+OLM_OPERATOR_GROUP_VERSION = "v1"
+DEFAULT_MUST_GATHER_IMAGE = os.getenv(
+    "MUST_GATHER_IMAGE", "registry.redhat.io/openshift4/ose-must-gather-rhel9:v4.22"
+)
 
 KUBEVIRT_GROUP = "kubevirt.io"
 KUBEVIRT_VERSION = "v1"
@@ -154,6 +158,51 @@ class ProjectCreateRequest(BaseModel):
     name: str
     display_name: Optional[str] = None
     description: Optional[str] = None
+
+
+class OperatorGroupCreateRequest(BaseModel):
+    name: str = "mcp-operator-group"
+    target_namespaces: Optional[List[str]] = None
+
+
+class OLMSubscriptionCreateRequest(BaseModel):
+    name: Optional[str] = None
+    package_name: str
+    channel: str = "stable"
+    source: str = "redhat-operators"
+    source_namespace: str = "openshift-marketplace"
+    install_plan_approval: str = "Automatic"
+    starting_csv: Optional[str] = None
+
+
+class AMQStreamsInstallRequest(BaseModel):
+    namespace: str = "openshift-operators"
+    channel: str = "stable"
+    source: str = "redhat-operators"
+    source_namespace: str = "openshift-marketplace"
+    install_plan_approval: str = "Automatic"
+
+
+class OLMOperatorInstallRequest(BaseModel):
+    namespace: str = "openshift-operators"
+    package_name: str
+    channel: str = "stable"
+    source: str = "redhat-operators"
+    source_namespace: str = "openshift-marketplace"
+    install_plan_approval: str = "Automatic"
+    subscription_name: Optional[str] = None
+    starting_csv: Optional[str] = None
+    create_operator_group: bool = False
+    operator_group_name: str = "mcp-operator-group"
+    target_namespaces: Optional[List[str]] = None
+
+
+class MustGatherRequest(BaseModel):
+    namespace: str = "mcp-server"
+    name: Optional[str] = None
+    image: Optional[str] = None
+    service_account_name: str = "mcp-openshift"
+    timeout_seconds: int = Field(default=3600, ge=60, le=86400)
 
 
 # --- Kubernetes client setup ---
@@ -855,6 +904,18 @@ def summarize_subscription(sub: Dict[str, Any]) -> Dict[str, Any]:
         "installed_csv": status.get("installedCSV"),
         "state": status.get("state"),
         "conditions": status.get("conditions", []),
+    }
+
+
+def summarize_operator_group(og: Dict[str, Any]) -> Dict[str, Any]:
+    spec = og.get("spec", {})
+    status = og.get("status", {})
+    return {
+        **_meta(og),
+        "target_namespaces": spec.get("targetNamespaces", []),
+        "service_account_name": spec.get("serviceAccountName"),
+        "namespaces": status.get("namespaces", []),
+        "last_updated": status.get("lastUpdated"),
     }
 
 
@@ -2085,6 +2146,252 @@ def list_catalog_sources_data(namespace: str) -> Dict[str, Any]:
     )
 
 
+def create_operator_group_data(
+    namespace: str,
+    name: str = "mcp-operator-group",
+    target_namespaces: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    validated_namespace = validated_dns_label(namespace, "namespace")
+    validated_targets = (
+        [validated_dns_label(n, "target namespace") for n in target_namespaces]
+        if target_namespaces
+        else None
+    )
+    body: Dict[str, Any] = {
+        "apiVersion": f"{OLM_GROUP}/{OLM_OPERATOR_GROUP_VERSION}",
+        "kind": "OperatorGroup",
+        "metadata": {"name": validated_name(name), "namespace": validated_namespace},
+        "spec": {},
+    }
+    if validated_targets is not None:
+        body["spec"]["targetNamespaces"] = validated_targets
+
+    try:
+        result = custom_objects.create_namespaced_custom_object(
+            OLM_GROUP,
+            OLM_OPERATOR_GROUP_VERSION,
+            validated_namespace,
+            "operatorgroups",
+            body,
+        )
+        return {"status": "created", "operator_group": summarize_operator_group(result)}
+    except ApiException as e:
+        raise api_error(e)
+
+
+def create_olm_subscription_data(
+    namespace: str,
+    package_name: str,
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+    name: Optional[str] = None,
+    starting_csv: Optional[str] = None,
+) -> Dict[str, Any]:
+    subscription_name = validated_name(name or package_name)
+    body: Dict[str, Any] = {
+        "apiVersion": f"{OLM_GROUP}/{OLM_VERSION}",
+        "kind": "Subscription",
+        "metadata": {
+            "name": subscription_name,
+            "namespace": validated_dns_label(namespace, "namespace"),
+        },
+        "spec": {
+            "channel": channel,
+            "installPlanApproval": install_plan_approval,
+            "name": package_name,
+            "source": source,
+            "sourceNamespace": source_namespace,
+        },
+    }
+    if starting_csv:
+        body["spec"]["startingCSV"] = starting_csv
+
+    try:
+        result = custom_objects.create_namespaced_custom_object(
+            OLM_GROUP,
+            OLM_VERSION,
+            validated_dns_label(namespace, "namespace"),
+            "subscriptions",
+            body,
+        )
+        return {"status": "created", "subscription": summarize_subscription(result)}
+    except ApiException as e:
+        raise api_error(e)
+
+
+def install_amq_streams_operator_data(
+    namespace: str = "openshift-operators",
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+) -> Dict[str, Any]:
+    return install_olm_operator_data(
+        namespace=namespace,
+        package_name="amq-streams",
+        channel=channel,
+        source=source,
+        source_namespace=source_namespace,
+        install_plan_approval=install_plan_approval,
+        subscription_name="amq-streams",
+    )
+
+
+def install_olm_operator_data(
+    namespace: str = "openshift-operators",
+    package_name: str = "",
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+    subscription_name: Optional[str] = None,
+    starting_csv: Optional[str] = None,
+    create_operator_group: bool = False,
+    operator_group_name: str = "mcp-operator-group",
+    target_namespaces: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    if not package_name:
+        raise HTTPException(status_code=400, detail="package_name is required")
+
+    operator_group = None
+    if create_operator_group:
+        operator_group = create_operator_group_data(
+            namespace=namespace,
+            name=operator_group_name,
+            target_namespaces=target_namespaces,
+        )
+
+    subscription = create_olm_subscription_data(
+        namespace=namespace,
+        package_name=package_name,
+        channel=channel,
+        source=source,
+        source_namespace=source_namespace,
+        install_plan_approval=install_plan_approval,
+        name=subscription_name or package_name,
+        starting_csv=starting_csv,
+    )
+
+    return {
+        "status": "created",
+        "operator_group": operator_group,
+        "subscription": subscription["subscription"],
+    }
+
+
+def start_must_gather_data(
+    namespace: str = "mcp-server",
+    name: Optional[str] = None,
+    image: Optional[str] = None,
+    service_account_name: str = "mcp-openshift",
+    timeout_seconds: int = 3600,
+) -> Dict[str, Any]:
+    validated_namespace = validated_dns_label(namespace, "namespace")
+    job_name = validated_name(
+        name or f"mcp-must-gather-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    )
+    gather_image = image or DEFAULT_MUST_GATHER_IMAGE
+    command = [
+        "/bin/bash",
+        "-lc",
+        (
+            "set -o pipefail; "
+            "mkdir -p /must-gather; cd /must-gather; "
+            "if [ -x /usr/bin/gather ]; then /usr/bin/gather; "
+            "elif command -v gather >/dev/null 2>&1; then gather; "
+            "else echo 'No gather executable found in image' >&2; exit 127; fi"
+        ),
+    ]
+    job = client.V1Job(
+        metadata=client.V1ObjectMeta(
+            name=job_name,
+            namespace=validated_namespace,
+            labels={
+                "app.kubernetes.io/name": "mcp-must-gather",
+                "app.kubernetes.io/part-of": "mcp-server",
+            },
+        ),
+        spec=client.V1JobSpec(
+            backoff_limit=0,
+            ttl_seconds_after_finished=86400,
+            active_deadline_seconds=timeout_seconds,
+            template=client.V1PodTemplateSpec(
+                metadata=client.V1ObjectMeta(
+                    labels={
+                        "app.kubernetes.io/name": "mcp-must-gather",
+                        "job-name": job_name,
+                    }
+                ),
+                spec=client.V1PodSpec(
+                    restart_policy="Never",
+                    service_account_name=validated_name(service_account_name),
+                    containers=[
+                        client.V1Container(
+                            name="must-gather",
+                            image=gather_image,
+                            image_pull_policy="IfNotPresent",
+                            command=command,
+                            volume_mounts=[
+                                client.V1VolumeMount(
+                                    name="must-gather-data", mount_path="/must-gather"
+                                )
+                            ],
+                        )
+                    ],
+                    volumes=[
+                        client.V1Volume(
+                            name="must-gather-data",
+                            empty_dir=client.V1EmptyDirVolumeSource(),
+                        )
+                    ],
+                ),
+            ),
+        ),
+    )
+
+    try:
+        result = batch_v1.create_namespaced_job(validated_namespace, body=job)
+        return {
+            "status": "created",
+            "job": summarize_job(result),
+            "namespace": validated_namespace,
+            "image": gather_image,
+            "logs_tool": "get_must_gather_logs",
+        }
+    except ApiException as e:
+        raise api_error(e)
+
+
+def get_must_gather_logs_data(namespace: str, job_name: str) -> Dict[str, Any]:
+    validated_namespace = validated_dns_label(namespace, "namespace")
+    validated_job = validated_name(job_name)
+    try:
+        pods = core_v1.list_namespaced_pod(
+            validated_namespace, label_selector=f"job-name={validated_job}"
+        )
+        if not pods.items:
+            return {
+                "job_name": job_name,
+                "namespace": namespace,
+                "pods": [],
+                "logs": "",
+            }
+        pod = pods.items[0]
+        logs = core_v1.read_namespaced_pod_log(
+            pod.metadata.name, validated_namespace, container="must-gather"
+        )
+        return {
+            "job_name": job_name,
+            "namespace": namespace,
+            "pod_name": pod.metadata.name,
+            "logs": logs,
+        }
+    except ApiException as e:
+        raise api_error(e, "Must-gather pod not found")
+
+
 # KubeVirt VMs / VMIs
 def list_virtualmachines_data(namespace: str) -> Dict[str, Any]:
     return _list_namespaced(
@@ -2367,7 +2674,8 @@ mcp = FastMCP(
         "machines, machine sets, OLM subscriptions, installed operators, catalog sources, "
         "KubeVirt VMs and VMIs. "
         "Mutate: restart/scale deployments and statefulsets, delete pods, update resources, "
-        "create namespaces/projects, trigger DC rollouts, start/stop/restart VMs."
+        "create namespaces/projects, install OLM operators, trigger must-gather jobs, "
+        "trigger DC rollouts, start/stop/restart VMs."
     ),
     **accepted_kwargs(FastMCP, MCP_TRANSPORT_KWARGS),
 )
@@ -2945,6 +3253,112 @@ def list_installed_operators(namespace: str) -> Dict[str, Any]:
 def list_catalog_sources(namespace: str = "openshift-marketplace") -> Dict[str, Any]:
     """List OLM CatalogSources (default namespace: openshift-marketplace)."""
     return list_catalog_sources_data(namespace)
+
+
+@mcp.tool()
+def create_operator_group(
+    namespace: str,
+    name: str = "mcp-operator-group",
+    target_namespaces: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Create an OLM OperatorGroup in a namespace."""
+    return create_operator_group_data(namespace, name, target_namespaces)
+
+
+@mcp.tool()
+def create_olm_subscription(
+    namespace: str,
+    package_name: str,
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+    name: Optional[str] = None,
+    starting_csv: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create an OLM Subscription for an operator package."""
+    return create_olm_subscription_data(
+        namespace=namespace,
+        package_name=package_name,
+        channel=channel,
+        source=source,
+        source_namespace=source_namespace,
+        install_plan_approval=install_plan_approval,
+        name=name,
+        starting_csv=starting_csv,
+    )
+
+
+@mcp.tool()
+def install_amq_streams_operator(
+    namespace: str = "openshift-operators",
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+) -> Dict[str, Any]:
+    """Install Red Hat AMQ Streams through OLM."""
+    return install_amq_streams_operator_data(
+        namespace=namespace,
+        channel=channel,
+        source=source,
+        source_namespace=source_namespace,
+        install_plan_approval=install_plan_approval,
+    )
+
+
+@mcp.tool()
+def install_olm_operator(
+    namespace: str,
+    package_name: str,
+    channel: str = "stable",
+    source: str = "redhat-operators",
+    source_namespace: str = "openshift-marketplace",
+    install_plan_approval: str = "Automatic",
+    subscription_name: Optional[str] = None,
+    starting_csv: Optional[str] = None,
+    create_operator_group: bool = False,
+    operator_group_name: str = "mcp-operator-group",
+    target_namespaces: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Install any OLM operator package through a Subscription."""
+    return install_olm_operator_data(
+        namespace=namespace,
+        package_name=package_name,
+        channel=channel,
+        source=source,
+        source_namespace=source_namespace,
+        install_plan_approval=install_plan_approval,
+        subscription_name=subscription_name,
+        starting_csv=starting_csv,
+        create_operator_group=create_operator_group,
+        operator_group_name=operator_group_name,
+        target_namespaces=target_namespaces,
+    )
+
+
+@mcp.tool()
+def start_must_gather(
+    namespace: str = "mcp-server",
+    name: Optional[str] = None,
+    image: Optional[str] = None,
+    service_account_name: str = "mcp-openshift",
+    timeout_seconds: int = 3600,
+) -> Dict[str, Any]:
+    """Start an OpenShift must-gather Job from the MCP server namespace."""
+    return start_must_gather_data(
+        namespace=namespace,
+        name=name,
+        image=image,
+        service_account_name=service_account_name,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+@mcp.tool()
+def get_must_gather_logs(namespace: str, job_name: str) -> Dict[str, Any]:
+    """Read logs from a must-gather Job started by start_must_gather."""
+    return get_must_gather_logs_data(namespace, job_name)
 
 
 # --- MCP tools: KubeVirt ---
@@ -3652,6 +4066,71 @@ def rest_list_installed_operators(namespace: str):
 @app.get("/api/v1/namespaces/{namespace}/catalogsources")
 def rest_list_catalog_sources(namespace: str):
     return list_catalog_sources_data(namespace)
+
+
+@app.post("/api/v1/namespaces/{namespace}/operatorgroups", status_code=201)
+def rest_create_operator_group(namespace: str, request: OperatorGroupCreateRequest):
+    return create_operator_group_data(
+        namespace, name=request.name, target_namespaces=request.target_namespaces
+    )
+
+
+@app.post("/api/v1/namespaces/{namespace}/subscriptions", status_code=201)
+def rest_create_olm_subscription(namespace: str, request: OLMSubscriptionCreateRequest):
+    return create_olm_subscription_data(
+        namespace=namespace,
+        package_name=request.package_name,
+        channel=request.channel,
+        source=request.source,
+        source_namespace=request.source_namespace,
+        install_plan_approval=request.install_plan_approval,
+        name=request.name,
+        starting_csv=request.starting_csv,
+    )
+
+
+@app.post("/api/v1/operators/amq-streams", status_code=201)
+def rest_install_amq_streams_operator(request: AMQStreamsInstallRequest):
+    return install_amq_streams_operator_data(
+        namespace=request.namespace,
+        channel=request.channel,
+        source=request.source,
+        source_namespace=request.source_namespace,
+        install_plan_approval=request.install_plan_approval,
+    )
+
+
+@app.post("/api/v1/operators/install", status_code=201)
+def rest_install_olm_operator(request: OLMOperatorInstallRequest):
+    return install_olm_operator_data(
+        namespace=request.namespace,
+        package_name=request.package_name,
+        channel=request.channel,
+        source=request.source,
+        source_namespace=request.source_namespace,
+        install_plan_approval=request.install_plan_approval,
+        subscription_name=request.subscription_name,
+        starting_csv=request.starting_csv,
+        create_operator_group=request.create_operator_group,
+        operator_group_name=request.operator_group_name,
+        target_namespaces=request.target_namespaces,
+    )
+
+
+@app.post("/api/v1/must-gather", status_code=201)
+def rest_start_must_gather(request: MustGatherRequest):
+    return start_must_gather_data(
+        namespace=request.namespace,
+        name=request.name,
+        image=request.image,
+        service_account_name=request.service_account_name,
+        timeout_seconds=request.timeout_seconds,
+    )
+
+
+@app.get("/api/v1/namespaces/{namespace}/must-gather/{job_name}/logs")
+def rest_get_must_gather_logs(namespace: str, job_name: str):
+    return get_must_gather_logs_data(namespace, job_name)
 
 
 # KubeVirt

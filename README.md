@@ -19,7 +19,7 @@ Images are published to **GitHub Container Registry (GHCR)** and updated on ever
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # Pull a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.9
 ```
 
 > An Alpine-based image is also available on `quay.io/fcalomen/mcp:openshift-<version>` for users who prefer a minimal footprint.

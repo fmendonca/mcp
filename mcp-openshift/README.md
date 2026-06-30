@@ -2,9 +2,9 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.0.3+  
-**UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`  
-**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.3.1`
+**Version:** 0.0.9
+**UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.9`
 
 [![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
 [![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
@@ -23,10 +23,10 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.3
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.9
 
 # Alpine
-podman pull quay.io/fcalomen/mcp:openshift-0.3.1
+podman pull quay.io/fcalomen/mcp:openshift-0.0.9
 ```
 
 ---
@@ -36,7 +36,7 @@ podman pull quay.io/fcalomen/mcp:openshift-0.3.1
 ### Kubernetes Core
 | Resource | Operations |
 |---|---|
-| Namespaces | list, get |
+| Namespaces | list, get, create |
 | Nodes | list, get |
 | Pods | list, get, delete, logs, events |
 | Containers | list (across pods) |
@@ -72,7 +72,7 @@ podman pull quay.io/fcalomen/mcp:openshift-0.3.1
 ### OpenShift-specific
 | Resource | Operations |
 |---|---|
-| Projects | list, get |
+| Projects | list, get, create |
 | Routes | list, get |
 | DeploymentConfigs | list, get, rollout restart |
 | BuildConfigs | list, get |
@@ -179,7 +179,7 @@ podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
 
 ```bash
 cd mcp-openshift
-VERSION=0.3.1 ./build.sh
+VERSION=0.0.9 ./build.sh
 ```
 
 ---
@@ -278,7 +278,7 @@ codex mcp add openshift \
 | Container | Runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem |
 | Input validation | Resource names validated with regex before reaching the Kubernetes API |
 | Secret exposure | Server never exposes Kubernetes Secret values — only metadata |
-| RBAC | Principle of least privilege — `get`/`list` on sensitive resources, `delete` only on pods, `patch` on workloads for restart/scale |
+| RBAC | Principle of least privilege — `get`/`list` on sensitive resources, `create` only on namespaces and ProjectRequests, `delete` only on pods, `patch` on workloads for restart/scale |
 | Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` on every response |
 | Error messages | Kubernetes internals never leaked in error responses |
 | CVE scanning | `pip-audit` and `bandit` run on every CI push |
@@ -299,8 +299,13 @@ codex mcp add openshift \
 
 All endpoints are under `/api/v1`. Full interactive docs at `/docs`.
 
+Namespace and Project names must be Kubernetes DNS labels, for example
+`teste-calo`. Names with underscores, such as `teste_calo`, are rejected before
+calling the cluster API.
+
 ```
 GET  /api/v1/namespaces
+POST /api/v1/namespaces  body: {"name": "example", "labels": {}, "annotations": {}}
 GET  /api/v1/namespaces/{namespace}
 GET  /api/v1/nodes
 GET  /api/v1/nodes/{node_name}
@@ -340,6 +345,7 @@ GET  /api/v1/rbac/clusterroles[/{name}]
 GET  /api/v1/rbac/clusterrolebindings[/{name}]
 GET  /api/v1/namespaces/{namespace}/routes[/{name}]
 GET  /api/v1/projects[/{project_name}]
+POST /api/v1/projects  body: {"name": "example", "display_name": "Example", "description": "Example project"}
 GET  /api/v1/namespaces/{namespace}/deploymentconfigs[/{name}]
 POST /api/v1/namespaces/{namespace}/deploymentconfigs/{name}/rollout/restart
 GET  /api/v1/namespaces/{namespace}/buildconfigs[/{name}]

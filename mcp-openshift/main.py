@@ -16,7 +16,7 @@ from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from urllib3.exceptions import MaxRetryError, NewConnectionError
 
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.0.9"
 
 # --- OpenShift / KubeVirt API group constants ---
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"
@@ -26,6 +26,7 @@ OPENSHIFT_ROUTE_PLURAL = "routes"
 OPENSHIFT_PROJECT_GROUP = "project.openshift.io"
 OPENSHIFT_PROJECT_VERSION = "v1"
 OPENSHIFT_PROJECT_PLURAL = "projects"
+OPENSHIFT_PROJECT_REQUEST_PLURAL = "projectrequests"
 
 OPENSHIFT_APPS_GROUP = "apps.openshift.io"
 OPENSHIFT_APPS_VERSION = "v1"
@@ -80,11 +81,26 @@ AUTH_PROTECTED_PREFIXES = (
 
 # --- Input validation ---
 _SAFE_NAME_RE = re.compile(r"^[^\x00/\\]{1,253}$")
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
 
 
 def validated_name(name: str) -> str:
     if not name or not _SAFE_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail=f"Invalid resource name: {name!r}")
+    return name
+
+
+def validated_dns_label(name: str, resource_type: str) -> str:
+    validated_name(name)
+    if not _DNS_LABEL_RE.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid {resource_type} name: {name!r}. Use a DNS label: "
+                "lowercase letters, numbers and hyphens only, up to 63 "
+                "characters, starting and ending with a letter or number."
+            ),
+        )
     return name
 
 
@@ -126,6 +142,18 @@ class LogQuery(BaseModel):
 
 class ScaleRequest(BaseModel):
     replicas: int = Field(ge=0, le=500)
+
+
+class NamespaceCreateRequest(BaseModel):
+    name: str
+    labels: Optional[Dict[str, str]] = None
+    annotations: Optional[Dict[str, str]] = None
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
 
 
 # --- Kubernetes client setup ---
@@ -170,6 +198,8 @@ def api_error(
         return HTTPException(status_code=403, detail="Forbidden by Kubernetes RBAC")
     if error.status == 401:
         return HTTPException(status_code=401, detail="Kubernetes authentication failed")
+    if error.status == 409:
+        return HTTPException(status_code=409, detail="Resource already exists")
     return HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -922,6 +952,25 @@ def get_namespace_data(namespace: str) -> Dict[str, Any]:
         return summarize_namespace(core_v1.read_namespace(validated_name(namespace)))
     except ApiException as e:
         raise api_error(e, "Namespace not found")
+
+
+def create_namespace_data(
+    namespace: str,
+    labels: Optional[Dict[str, str]] = None,
+    annotations: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    try:
+        body = client.V1Namespace(
+            metadata=client.V1ObjectMeta(
+                name=validated_dns_label(namespace, "namespace"),
+                labels=labels or {},
+                annotations=annotations or {},
+            )
+        )
+        result = core_v1.create_namespace(body=body)
+        return {"status": "created", "namespace": summarize_namespace(result)}
+    except ApiException as e:
+        raise api_error(e)
 
 
 def list_nodes_data(label_selector: Optional[str] = None) -> Dict[str, Any]:
@@ -1711,6 +1760,34 @@ def get_project_data(project_name: str) -> Dict[str, Any]:
     )
 
 
+def create_project_data(
+    project_name: str,
+    display_name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    name = validated_dns_label(project_name, "project")
+    body = {
+        "apiVersion": f"{OPENSHIFT_PROJECT_GROUP}/{OPENSHIFT_PROJECT_VERSION}",
+        "kind": "ProjectRequest",
+        "metadata": {"name": name},
+    }
+    if display_name is not None:
+        body["displayName"] = display_name
+    if description is not None:
+        body["description"] = description
+
+    try:
+        result = custom_objects.create_cluster_custom_object(
+            OPENSHIFT_PROJECT_GROUP,
+            OPENSHIFT_PROJECT_VERSION,
+            OPENSHIFT_PROJECT_REQUEST_PLURAL,
+            body,
+        )
+        return {"status": "created", "project": summarize_project(result)}
+    except ApiException as e:
+        raise api_error(e)
+
+
 # OpenShift DeploymentConfigs
 def list_deployment_configs_data(namespace: str) -> Dict[str, Any]:
     return _list_namespaced(
@@ -2290,7 +2367,7 @@ mcp = FastMCP(
         "machines, machine sets, OLM subscriptions, installed operators, catalog sources, "
         "KubeVirt VMs and VMIs. "
         "Mutate: restart/scale deployments and statefulsets, delete pods, update resources, "
-        "trigger DC rollouts, start/stop/restart VMs."
+        "create namespaces/projects, trigger DC rollouts, start/stop/restart VMs."
     ),
     **accepted_kwargs(FastMCP, MCP_TRANSPORT_KWARGS),
 )
@@ -2307,6 +2384,16 @@ def list_namespaces() -> Dict[str, Any]:
 def get_namespace(namespace: str) -> Dict[str, Any]:
     """Get details for one Kubernetes namespace."""
     return get_namespace_data(namespace)
+
+
+@mcp.tool()
+def create_namespace(
+    namespace: str,
+    labels: Optional[Dict[str, str]] = None,
+    annotations: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Create a Kubernetes namespace with optional labels and annotations."""
+    return create_namespace_data(namespace, labels=labels, annotations=annotations)
 
 
 # --- MCP tools: nodes ---
@@ -2687,6 +2774,18 @@ def list_projects() -> Dict[str, Any]:
 def get_project(project_name: str) -> Dict[str, Any]:
     """Get one OpenShift Project."""
     return get_project_data(project_name)
+
+
+@mcp.tool()
+def create_project(
+    project_name: str,
+    display_name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create an OpenShift Project using a ProjectRequest."""
+    return create_project_data(
+        project_name, display_name=display_name, description=description
+    )
 
 
 # --- MCP tools: OpenShift DeploymentConfigs ---
@@ -3072,6 +3171,13 @@ def rest_get_namespace(namespace: str):
     return get_namespace_data(namespace)
 
 
+@app.post("/api/v1/namespaces", status_code=201)
+def rest_create_namespace(request: NamespaceCreateRequest):
+    return create_namespace_data(
+        request.name, labels=request.labels, annotations=request.annotations
+    )
+
+
 # Nodes
 @app.get("/api/v1/nodes")
 def rest_list_nodes(label_selector: Optional[str] = None):
@@ -3404,6 +3510,15 @@ def rest_list_projects():
 @app.get("/api/v1/projects/{project_name}")
 def rest_get_project(project_name: str):
     return get_project_data(project_name)
+
+
+@app.post("/api/v1/projects", status_code=201)
+def rest_create_project(request: ProjectCreateRequest):
+    return create_project_data(
+        request.name,
+        display_name=request.display_name,
+        description=request.description,
+    )
 
 
 # OpenShift DeploymentConfigs

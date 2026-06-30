@@ -8,7 +8,7 @@ This directory contains automated CI/CD workflows for the mcp project.
 **Purpose:** Build and push container images to registry
 
 **Triggers:**
-- Push to tags matching `v*` (e.g., `v0.3.1`)
+- Push to tags matching `v*` (e.g., `v0.0.9`)
 - Manual workflow dispatch with custom version
 
 **Steps:**
@@ -26,12 +26,12 @@ This directory contains automated CI/CD workflows for the mcp project.
 **Example Usage:**
 ```bash
 # Automatic on tag push
-git tag v0.3.1
-git push origin v0.3.1
+git tag v0.0.9
+git push origin v0.0.9
 
 # Manual trigger (GitHub UI)
 # Go to Actions > Build and Push Container Image > Run workflow
-# Enter version: 0.3.1
+# Enter version: 0.0.9
 ```
 
 ### tests.yml
@@ -90,7 +90,7 @@ act workflow_dispatch -W .github/workflows/build-and-push.yml \
 ## Troubleshooting
 
 ### Build fails with "Invalid VERSION format"
-- Ensure tag follows semver: `vX.Y.Z` (e.g., `v0.3.1`)
+- Ensure tag follows semver: `vX.Y.Z` (e.g., `v0.0.9`)
 - No pre-release suffixes in automated builds
 
 ### Tests timeout

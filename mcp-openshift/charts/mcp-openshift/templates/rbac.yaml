@@ -11,6 +11,9 @@ rules:
     resources: ["namespaces", "nodes", "persistentvolumes", "storageclasses"]
     verbs: ["get", "list"]
   - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create"]
+  - apiGroups: [""]
     resources: ["pods", "pods/log", "events", "services",
                 "persistentvolumeclaims", "configmaps", "serviceaccounts",
                 "resourcequotas", "limitranges"]
@@ -50,6 +53,9 @@ rules:
   - apiGroups: ["project.openshift.io"]
     resources: ["projects"]
     verbs: ["get", "list"]
+  - apiGroups: ["project.openshift.io"]
+    resources: ["projectrequests"]
+    verbs: ["create"]
   # OpenShift Apps (DeploymentConfigs)
   - apiGroups: ["apps.openshift.io"]
     resources: ["deploymentconfigs"]

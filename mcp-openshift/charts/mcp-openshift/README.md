@@ -2,6 +2,12 @@
 
 Deploys the MCP OpenShift/Kubernetes/KubeVirt operations server to the `mcp-server` namespace by default.
 
+## Version
+
+| Chart | App | Default image tag |
+| --- | --- | --- |
+| `0.0.9` | `0.0.9` | `openshift-0.0.9` |
+
 ## Install
 
 Generate a token and install the chart:
@@ -45,8 +51,8 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | --- | --- | --- |
 | `namespace.name` | `mcp-server` | Namespace used by namespaced resources |
 | `namespace.create` | `false` | Create a Namespace object from the chart. Keep this `false` when using `--create-namespace` or an existing namespace |
-| `image.repository` | `quay.io/fcalomen/mcp-openshift` | Container image repository |
-| `image.tag` | `0.2.2` | Container image tag |
+| `image.repository` | `quay.io/fcalomen/mcp` | Container image repository |
+| `image.tag` | `openshift-0.0.9` | Container image tag |
 | `auth.enabled` | `true` | Set `MCP_AUTH_TOKEN` in the deployment |
 | `auth.token` | empty | Token used to create the chart-managed Secret |
 | `auth.existingSecret` | empty | Existing Secret name containing the token |
@@ -54,3 +60,16 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | `rbac.create` | `true` | Create ClusterRole and ClusterRoleBinding |
 | `route.enabled` | `true` | Create an OpenShift Route |
 | `route.host` | empty | Optional explicit Route host |
+
+## RBAC scope
+
+The chart grants read access to cluster and namespaced inventory resources, plus narrowly scoped mutating verbs for supported operations. Namespace and OpenShift Project creation require:
+
+```yaml
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["create"]
+- apiGroups: ["project.openshift.io"]
+  resources: ["projectrequests"]
+  verbs: ["create"]
+```

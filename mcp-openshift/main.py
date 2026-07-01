@@ -16,7 +16,7 @@ from mcp.server.fastmcp.server import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from urllib3.exceptions import MaxRetryError, NewConnectionError
 
-APP_VERSION = "0.0.10"
+APP_VERSION = "0.0.11"
 
 # --- OpenShift / KubeVirt API group constants ---
 OPENSHIFT_ROUTE_GROUP = "route.openshift.io"

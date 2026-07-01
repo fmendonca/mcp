@@ -6,7 +6,7 @@ Deploys the MCP OpenShift/Kubernetes/KubeVirt operations server to the `mcp-serv
 
 | Chart | App | Default image tag |
 | --- | --- | --- |
-| `0.0.10` | `0.0.10` | `openshift-0.0.10` |
+| `0.0.11` | `0.0.11` | `openshift-0.0.11` |
 
 ## Install
 
@@ -52,7 +52,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | `namespace.name` | `mcp-server` | Namespace used by namespaced resources |
 | `namespace.create` | `false` | Create a Namespace object from the chart. Keep this `false` when using `--create-namespace` or an existing namespace |
 | `image.repository` | `quay.io/fcalomen/mcp` | Container image repository |
-| `image.tag` | `openshift-0.0.10` | Container image tag |
+| `image.tag` | `openshift-0.0.11` | Container image tag |
 | `auth.enabled` | `true` | Set `MCP_AUTH_TOKEN` in the deployment |
 | `auth.token` | empty | Token used to create the chart-managed Secret |
 | `auth.existingSecret` | empty | Existing Secret name containing the token |
@@ -63,7 +63,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 
 ## RBAC scope
 
-The chart grants operational access for the exposed MCP tools, including broad read-only access for must-gather, namespace/project creation, OLM operator installation and must-gather Jobs. The key mutating permissions are:
+The chart grants operational access for the exposed MCP tools, including broad read-only access for must-gather, namespace/project creation, OLM operator installation and must-gather Jobs. A full cluster must-gather also needs `pods/exec` and temporary DaemonSets for node performance collection. The key mutating permissions are:
 
 ```yaml
 - apiGroups: [""]
@@ -77,5 +77,11 @@ The chart grants operational access for the exposed MCP tools, including broad r
   verbs: ["create"]
 - apiGroups: ["batch"]
   resources: ["jobs"]
+  verbs: ["create", "delete"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
   verbs: ["create", "delete"]
 ```

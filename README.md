@@ -8,7 +8,7 @@ Each server exposes both a REST API (`/api/v1`) and an MCP Streamable HTTP endpo
 
 | Server | Description | Image |
 |---|---|---|
-| [mcp-openshift](mcp-openshift/) | Full OpenShift/Kubernetes admin (75+ tools) | `ghcr.io/fmendonca/mcp-openshift:latest` |
+| [mcp-openshift](mcp-openshift/) | Full OpenShift/Kubernetes admin (100+ tools) | `ghcr.io/fmendonca/mcp-openshift:latest` |
 
 ## Container Registry
 
@@ -19,7 +19,7 @@ Images are published to **GitHub Container Registry (GHCR)** and updated on ever
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # Pull a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.10
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.11
 ```
 
 > An Alpine-based image is also available on `quay.io/fcalomen/mcp:openshift-<version>` for users who prefer a minimal footprint.

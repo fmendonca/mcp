@@ -2,9 +2,9 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.0.10
+**Version:** 0.0.11
 **UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`
-**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.10`
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.11`
 
 [![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
 [![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
@@ -23,10 +23,10 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.10
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.11
 
 # Alpine
-podman pull quay.io/fcalomen/mcp:openshift-0.0.10
+podman pull quay.io/fcalomen/mcp:openshift-0.0.11
 ```
 
 ---
@@ -182,7 +182,7 @@ podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
 
 ```bash
 cd mcp-openshift
-VERSION=0.0.10 ./build.sh
+VERSION=0.0.11 ./build.sh
 ```
 
 ---
@@ -281,7 +281,7 @@ codex mcp add openshift \
 | Container | Runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem |
 | Input validation | Resource names validated with regex before reaching the Kubernetes API |
 | Secret exposure | Server never exposes Kubernetes Secret values — only metadata |
-| RBAC | Operational RBAC for supported actions, including broad read-only access for must-gather, `create` on namespaces, ProjectRequests, OLM Subscriptions/OperatorGroups, and Jobs |
+| RBAC | Operational RBAC for supported actions, including broad read-only access for must-gather, `create` on namespaces, ProjectRequests, OLM Subscriptions/OperatorGroups, Jobs, `pods/exec`, and temporary DaemonSets used by must-gather |
 | Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` on every response |
 | Error messages | Kubernetes internals never leaked in error responses |
 | CVE scanning | `pip-audit` and `bandit` run on every CI push |

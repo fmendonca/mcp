@@ -10,7 +10,7 @@ RUN pip3 install --no-cache-dir --upgrade \
         'setuptools>=78.1.1' && \
     pip3 install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY *.py .
 
 # ubi9/python-312 already uses UID 1001 (default non-root user)
 USER 1001

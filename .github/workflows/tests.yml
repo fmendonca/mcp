@@ -102,23 +102,23 @@ jobs:
 
       - name: Format check with black
         working-directory: mcp-openshift
-        run: black --check --diff main.py tests/
+        run: black --check --diff *.py tests/
 
       - name: Sort imports with isort
         working-directory: mcp-openshift
-        run: isort --check-only --diff main.py tests/
+        run: isort --check-only --diff *.py tests/
 
       - name: Lint with flake8
         working-directory: mcp-openshift
         continue-on-error: true
         run: |
-          flake8 main.py --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 main.py --count --exit-zero --max-complexity=10 --max-line-length=120
+          flake8 *.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 *.py --count --exit-zero --max-complexity=10 --max-line-length=120
 
       - name: Type check with mypy
         working-directory: mcp-openshift
         continue-on-error: true
-        run: mypy main.py --ignore-missing-imports --no-strict-optional || true
+        run: mypy *.py --ignore-missing-imports --no-strict-optional || true
 
   helm-lint:
     name: Helm Chart Validation

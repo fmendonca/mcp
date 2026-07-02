@@ -1,14 +1,49 @@
-.DS_Store
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.venv/
-venv/
-env/
-*.egg-info/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Kubernetes/Docker
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Environment files
 .env
 .env.*
 !.env.example
+
+# Build artifacts
+*.tar.gz
+*.tar
+*.zip

@@ -118,7 +118,7 @@ jobs:
       - name: Type check with mypy
         working-directory: mcp-openshift
         continue-on-error: true
-        run: mypy *.py --ignore-missing-imports --no-strict-optional || true
+        run: mypy *.py || true
 
   helm-lint:
     name: Helm Chart Validation

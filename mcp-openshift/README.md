@@ -112,7 +112,7 @@ export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
 ```
 
 Protected prefixes: `/mcp`, `/api/v1`, `/namespaces`, `/rbac`, `/nodes`, `/projects`  
-Public: `/`, `/docs`, `/openapi.json`, `/healthz`, `/readyz`
+Public: `/`, `/docs`, `/openapi.json`, `/healthz`, `/readyz`, `/metrics`
 
 Accepted headers:
 - `Authorization: Bearer <token>`
@@ -270,6 +270,26 @@ codex mcp add openshift \
   --url https://<your-route>/mcp \
   --bearer-token-env-var MCP_AUTH_TOKEN
 ```
+
+---
+
+## Observability
+
+Prometheus metrics are exposed at `/metrics` (unauthenticated, like `/healthz`):
+
+- `mcp_openshift_http_requests_total{method,path,status_code}` — request
+  count, labeled by the matched route template (e.g.
+  `/api/v1/namespaces/{namespace}`, not the literal namespace name, so
+  cardinality stays bounded regardless of cluster size)
+- `mcp_openshift_http_request_duration_seconds{method,path}` — request
+  latency histogram
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+Scrape it with a standard Prometheus `ServiceMonitor`/`PodMonitor`, or point
+a `scrape_config` directly at the Service on port 8000.
 
 ---
 

@@ -30,6 +30,7 @@ from crd_helpers import _list_cluster  # noqa: F401
 from crd_helpers import _list_namespaced  # noqa: F401
 from errors import crd_not_available  # noqa: F401
 from errors import api_error
+from metrics import metrics_endpoint, record_request_metrics
 from validation import validated_name  # noqa: F401
 from validation import csv_env
 
@@ -181,6 +182,14 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     return response
+
+
+app.middleware("http")(record_request_metrics)
+
+
+@app.get("/metrics")
+def metrics():
+    return metrics_endpoint()
 
 
 @app.get("/")

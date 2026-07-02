@@ -27,10 +27,16 @@ type: Opaque
 stringData:
   token: "replace-with-generated-token"
 ---
+# Separate, independently-removable ClusterRole: grants cluster-wide
+# get/list on ALL resources in ALL API groups, including Secrets. This is
+# required only by the start_must_gather tool, which needs broad discovery
+# to collect diagnostics the way `oc adm must-gather` does. Delete this
+# ClusterRole and its binding below if that tool is not needed — none of
+# the other tools in this server read Secret objects or values.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: mcp-openshift
+  name: mcp-openshift-must-gather
   labels:
     app.kubernetes.io/name: mcp-openshift
     app.kubernetes.io/part-of: mcp-server
@@ -40,6 +46,31 @@ rules:
   verbs: ["get", "list"]
 - nonResourceURLs: ["*"]
   verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-openshift-must-gather
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-openshift-must-gather
+subjects:
+- kind: ServiceAccount
+  name: mcp-openshift
+  namespace: mcp-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-openshift
+  labels:
+    app.kubernetes.io/name: mcp-openshift
+    app.kubernetes.io/part-of: mcp-server
+rules:
 - apiGroups: [""]
   resources: ["namespaces", "nodes", "persistentvolumes"]
   verbs: ["get", "list"]
@@ -174,7 +205,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mcp-openshift
-        image: quay.io/fcalomen/mcp:openshift-0.0.11
+        image: quay.io/fcalomen/mcp:openshift-0.0.13
         imagePullPolicy: Always
         env:
         - name: MCP_ALLOWED_HOSTS

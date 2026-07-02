@@ -2,9 +2,9 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.0.11
+**Version:** 0.0.13
 **UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`
-**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.11`
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.13`
 
 [![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
 [![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
@@ -23,10 +23,10 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.11
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.13
 
 # Alpine
-podman pull quay.io/fcalomen/mcp:openshift-0.0.11
+podman pull quay.io/fcalomen/mcp:openshift-0.0.13
 ```
 
 ---
@@ -182,7 +182,7 @@ podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
 
 ```bash
 cd mcp-openshift
-VERSION=0.0.11 ./build.sh
+VERSION=0.0.13 ./build.sh
 ```
 
 ---

@@ -6,7 +6,7 @@ Deploys the MCP OpenShift/Kubernetes/KubeVirt operations server to the `mcp-serv
 
 | Chart | App | Default image tag |
 | --- | --- | --- |
-| `0.0.11` | `0.0.11` | `openshift-0.0.11` |
+| `0.0.13` | `0.0.13` | `openshift-0.0.13` |
 
 ## Install
 
@@ -52,7 +52,7 @@ helm upgrade --install mcp-openshift ./charts/mcp-openshift \
 | `namespace.name` | `mcp-server` | Namespace used by namespaced resources |
 | `namespace.create` | `false` | Create a Namespace object from the chart. Keep this `false` when using `--create-namespace` or an existing namespace |
 | `image.repository` | `quay.io/fcalomen/mcp` | Container image repository |
-| `image.tag` | `openshift-0.0.11` | Container image tag |
+| `image.tag` | `openshift-0.0.13` | Container image tag |
 | `auth.enabled` | `true` | Set `MCP_AUTH_TOKEN` in the deployment |
 | `auth.token` | empty | Token used to create the chart-managed Secret |
 | `auth.existingSecret` | empty | Existing Secret name containing the token |

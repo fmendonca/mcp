@@ -19,7 +19,7 @@ Images are published to **GitHub Container Registry (GHCR)** and updated on ever
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # Pull a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.11
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.13
 ```
 
 > An Alpine-based image is also available on `quay.io/fcalomen/mcp:openshift-<version>` for users who prefer a minimal footprint.
@@ -29,7 +29,8 @@ podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.11
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | [Tests and Linting](.github/workflows/tests.yml) | push / PR | pytest (3.10 – 3.12), black, isort, flake8, bandit, pip-audit, Helm lint, Hadolint |
-| [Release — UBI9 / GHCR](.github/workflows/release.yml) | push to `main` | build multi-arch UBI9 image, push to GHCR, create GitHub Release |
+| [Release — UBI9 / GHCR](.github/workflows/release.yml) | push to `main` | build multi-arch UBI9 image, push to GHCR, tag `vX.Y.Z`, create GitHub Release |
+| [Build and Push — Alpine / Quay](.github/workflows/build-and-push.yml) | the `vX.Y.Z` tag above, or manual dispatch | build multi-arch Alpine image, push to Quay, append Quay info to the release |
 
 ## Common Design Principles
 

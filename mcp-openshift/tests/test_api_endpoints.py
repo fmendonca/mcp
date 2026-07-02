@@ -24,11 +24,20 @@ class TestRootEndpoint:
         assert "mcp" in data
 
     def test_root_contains_correct_version(self, client):
-        """Test that root endpoint returns correct version."""
-        response = client.get("/")
+        """Test that root endpoint reflects whatever APP_VERSION resolves to.
+
+        APP_VERSION is read from the APP_VERSION env var at import time (set
+        by CI at build time), not hardcoded — patch it to a known value here
+        rather than asserting a literal that would otherwise need updating
+        on every release.
+        """
+        import main
+
+        with patch.object(main, "APP_VERSION", "9.9.9-test"):
+            response = client.get("/")
+
         assert response.status_code == 200
-        data = response.json()
-        assert data["version"] == "0.0.13"
+        assert response.json()["version"] == "9.9.9-test"
 
 
 class TestHealthEndpoints:

@@ -33,7 +33,12 @@ from errors import api_error
 from validation import validated_name  # noqa: F401
 from validation import csv_env
 
-APP_VERSION = "0.0.13"
+# Baked into the image at build time (see Dockerfile*'s APP_VERSION build
+# arg) from whatever version CI is actually publishing — never hardcode a
+# version string here, it *will* drift from the real release (it did,
+# repeatedly: main.py, Chart.yaml, values.yaml, and the raw deploy manifest
+# were all stuck on an old release for weeks before this was noticed).
+APP_VERSION = os.getenv("APP_VERSION", "0.0.0-dev")
 
 # --- Auth ---
 AUTH_TOKEN_PLACEHOLDERS = {

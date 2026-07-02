@@ -28,7 +28,7 @@ class TestRootEndpoint:
         response = client.get("/")
         assert response.status_code == 200
         data = response.json()
-        assert data["version"] == "0.0.11"
+        assert data["version"] == "0.0.13"
 
 
 class TestHealthEndpoints:

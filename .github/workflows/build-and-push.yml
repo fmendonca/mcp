@@ -18,6 +18,9 @@ env:
   REGISTRY: quay.io
   IMAGE_NAME: fcalomen/mcp:openshift
 
+permissions:
+  contents: write   # create/update the GitHub Release for tag pushes
+
 jobs:
   validate:
     name: Validate Version
@@ -131,17 +134,23 @@ jobs:
           echo "Building version: $VERSION"
           ./build.sh
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        # release.yml (triggered by the preceding push to main) already
+        # creates the release for this tag with a GHCR changelog body.
+        # append_body here so this step adds the Quay section instead of
+        # clobbering it if both workflows run for the same tag.
+        uses: softprops/action-gh-release@v2
         with:
+          append_body: true
           body: |
-            ## Container Images
+
+            ## Quay container image
+
             - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}`
             - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}-arm64`
             - `quay.io/fcalomen/mcp:openshift-${{ needs.validate.outputs.version }}-amd64`
 
-            ## Helm Chart
             ```bash
             helm install mcp-openshift ./charts/mcp-openshift \
               --set image.tag="openshift-${{ needs.validate.outputs.version }}"

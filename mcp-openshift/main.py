@@ -33,7 +33,7 @@ from errors import api_error
 from validation import validated_name  # noqa: F401
 from validation import csv_env
 
-APP_VERSION = "0.0.11"
+APP_VERSION = "0.0.13"
 
 # --- Auth ---
 AUTH_TOKEN_PLACEHOLDERS = {

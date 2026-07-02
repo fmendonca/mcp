@@ -10,7 +10,21 @@ Deploys the MCP OpenShift/Kubernetes/KubeVirt operations server to the `mcp-serv
 
 ## Install
 
-Generate a token and install the chart:
+### From the OCI registry (no checkout needed)
+
+Every release publishes the chart to GHCR alongside the container image:
+
+```bash
+export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+helm install mcp-openshift oci://ghcr.io/fmendonca/charts/mcp-openshift \
+  --version 0.0.13 \
+  --namespace mcp-server \
+  --create-namespace \
+  --set auth.token="$MCP_AUTH_TOKEN"
+```
+
+### From a local checkout
 
 ```bash
 export MCP_AUTH_TOKEN="$(openssl rand -hex 32)"

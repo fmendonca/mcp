@@ -128,12 +128,46 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ──────────────────────────────────────────────────────────
-  # 3. Tag the commit and create GitHub Release
+  # 3. Package and publish the Helm chart as an OCI artifact
+  # ──────────────────────────────────────────────────────────
+  publish-chart:
+    name: Publish Helm chart to GHCR
+    runs-on: ubuntu-latest
+    needs: [version, build-push]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io \
+            --username ${{ github.actor }} --password-stdin
+
+      - name: Package chart
+        working-directory: mcp-openshift
+        run: |
+          helm package charts/mcp-openshift \
+            --version "${{ needs.version.outputs.version }}" \
+            --app-version "${{ needs.version.outputs.version }}" \
+            --destination /tmp/chart-out
+
+      - name: Push chart to ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          helm push /tmp/chart-out/mcp-openshift-${{ needs.version.outputs.version }}.tgz \
+            oci://ghcr.io/${{ github.repository_owner }}/charts
+
+  # ──────────────────────────────────────────────────────────
+  # 4. Tag the commit and create GitHub Release
   # ──────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [version, build-push]
+    needs: [version, build-push, publish-chart]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -177,6 +211,16 @@ jobs:
             **Image digest:** `${{ needs.build-push.outputs.digest }}`
             **Platforms:** `linux/amd64`, `linux/arm64`
             **Base image:** `registry.access.redhat.com/ubi9/python-312`
+
+            ### Helm chart
+
+            ```bash
+            helm install mcp-openshift \
+              oci://ghcr.io/${{ github.repository_owner }}/charts/mcp-openshift \
+              --version ${{ needs.version.outputs.version }} \
+              --namespace mcp-server --create-namespace \
+              --set auth.token="$(openssl rand -hex 32)"
+            ```
 
             ### Quick start
 

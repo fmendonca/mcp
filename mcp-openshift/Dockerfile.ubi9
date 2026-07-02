@@ -1,6 +1,13 @@
 # hadolint ignore=DL3006
 FROM registry.access.redhat.com/ubi9/python-312
 
+# Single source of truth for the running app's self-reported version — set
+# by CI to the actual tag/version being built (see release.yml). Never
+# hardcode a version elsewhere; it drifts the moment nobody remembers to
+# bump it.
+ARG APP_VERSION=0.0.0-dev
+ENV APP_VERSION=${APP_VERSION}
+
 WORKDIR /opt/app-root/src
 
 COPY requirements.txt .
@@ -23,6 +30,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 LABEL org.opencontainers.image.source="https://github.com/fmendonca/mcp" \
       org.opencontainers.image.title="mcp-openshift" \
       org.opencontainers.image.description="OpenShift Admin MCP Server — UBI9 variant" \
-      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/python-312"
+      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/python-312" \
+      org.opencontainers.image.version="${APP_VERSION}"
 
 CMD ["python3", "-m", "uvicorn", "--app-dir", "/opt/app-root/src", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -6,7 +6,7 @@ replicaCount: 1
 
 image:
   repository: quay.io/fcalomen/mcp
-  tag: "openshift-0.0.11"
+  tag: "openshift-0.0.13"
   pullPolicy: IfNotPresent
 
 nameOverride: ""

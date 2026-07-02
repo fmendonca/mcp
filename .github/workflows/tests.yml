@@ -151,9 +151,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Hadolint Dockerfile scan
+      - name: Hadolint Dockerfile scan (Alpine)
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: mcp-openshift/Dockerfile
+          ignore: DL3008,DL3009
+        continue-on-error: true
+
+      - name: Hadolint Dockerfile.ubi9 scan (published image)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: mcp-openshift/Dockerfile.ubi9
           ignore: DL3008,DL3009
         continue-on-error: true

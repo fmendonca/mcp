@@ -35,6 +35,10 @@ mcp:
 
 rbac:
   create: true
+  # Grants cluster-wide get/list on ALL resources in ALL API groups (including
+  # Secrets), required by the start_must_gather tool. Bound via a separate
+  # ClusterRole so it can be disabled if must-gather is not needed.
+  mustGatherDiscovery: true
 
 service:
   type: ClusterIP

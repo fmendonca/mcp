@@ -1,3 +1,38 @@
+{{- if and .Values.rbac.create .Values.rbac.mustGatherDiscovery }}
+# Separate, independently-toggleable ClusterRole: grants cluster-wide
+# get/list on ALL resources in ALL API groups, including Secrets. This is
+# required only by the start_must_gather tool, which needs broad discovery
+# to collect diagnostics the way `oc adm must-gather` does. Disable via
+# `rbac.mustGatherDiscovery: false` if that tool is not needed — none of the
+# other tools in this server read Secret objects or values.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcp-openshift.fullname" . }}-must-gather
+  labels:
+    {{- include "mcp-openshift.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list"]
+  - nonResourceURLs: ["*"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "mcp-openshift.fullname" . }}-must-gather
+  labels:
+    {{- include "mcp-openshift.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "mcp-openshift.fullname" . }}-must-gather
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mcp-openshift.serviceAccountName" . }}
+    namespace: {{ include "mcp-openshift.namespace" . }}
+{{- end }}
 {{- if .Values.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -6,12 +41,6 @@ metadata:
   labels:
     {{- include "mcp-openshift.labels" . | nindent 4 }}
 rules:
-  # Must-gather needs broad read-only inventory across API groups.
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["get", "list"]
-  - nonResourceURLs: ["*"]
-    verbs: ["get"]
   # Core: namespaces, nodes, pods, services, events, storage, config, quotas
   - apiGroups: [""]
     resources: ["namespaces", "nodes", "persistentvolumes", "storageclasses"]

@@ -246,6 +246,60 @@ Or add to `.mcp.json`:
 }
 ```
 
+### Claude Desktop
+
+Claude Desktop only supports stdio servers directly, so bridge to the
+Streamable HTTP endpoint with `mcp-remote`. Add to `claude_desktop_config.json`
+([config location docs](https://modelcontextprotocol.io/quickstart/user)):
+
+```json
+{
+  "mcpServers": {
+    "openshift": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://<your-route>/mcp",
+        "--header",
+        "Authorization: Bearer ${MCP_AUTH_TOKEN}"
+      ]
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to `.cursor/mcp.json` in your project (or the global `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "openshift": {
+      "url": "https://<your-route>/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_AUTH_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### Continue.dev
+
+Add to `config.yaml`:
+
+```yaml
+mcpServers:
+  - name: openshift
+    type: streamable-http
+    url: https://<your-route>/mcp
+    requestOptions:
+      headers:
+        Authorization: "Bearer ${{ secrets.MCP_AUTH_TOKEN }}"
+```
+
 ### VS Code / GitHub Copilot
 
 ```json

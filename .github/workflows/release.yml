@@ -126,6 +126,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ needs.version.outputs.version }}
+          # Attach a signed SLSA provenance attestation and an SPDX SBOM to
+          # the pushed image so consumers can verify what was built, from
+          # what source, and with which dependencies.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

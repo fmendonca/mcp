@@ -2,12 +2,12 @@ name: Tests and Linting
 
 on:
   push:
-    branches: [main, develop, 'feat/**']
+    branches: [main, dev]
     paths:
       - 'mcp-openshift/**'
       - '.github/workflows/tests.yml'
   pull_request:
-    branches: [main, develop]
+    branches: [main, dev]
     paths:
       - 'mcp-openshift/**'
 

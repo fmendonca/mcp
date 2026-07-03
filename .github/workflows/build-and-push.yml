@@ -105,8 +105,11 @@ jobs:
     name: Build and Push Images
     runs-on: ubuntu-latest
     needs: [validate, test, lint-helm]
+    # Job-level permissions REPLACE the workflow-level block entirely (they
+    # don't merge), so contents must be write here too or the release-update
+    # step 403s with "Resource not accessible by integration".
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - name: Checkout code

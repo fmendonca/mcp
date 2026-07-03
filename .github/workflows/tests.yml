@@ -17,18 +17,19 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        # 3.10 = documented minimum, 3.12 = UBI9 image, 3.14 = Alpine image
+        python-version: ['3.10', '3.12', '3.14']
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache pip packages
-        uses: actions/cache@v3
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements-dev.txt') }}
@@ -47,7 +48,7 @@ jobs:
           pytest tests/ -v --tb=short --cov=. --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v7
         with:
           files: ./mcp-openshift/coverage.xml
           flags: unittests
@@ -59,10 +60,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -87,10 +88,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -125,10 +126,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v5
         with:
           version: 'latest'
 
@@ -149,17 +150,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Hadolint Dockerfile scan (Alpine)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: mcp-openshift/Dockerfile
           ignore: DL3008,DL3009
         continue-on-error: true
 
       - name: Hadolint Dockerfile.ubi9 scan (published image)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: mcp-openshift/Dockerfile.ubi9
           ignore: DL3008,DL3009

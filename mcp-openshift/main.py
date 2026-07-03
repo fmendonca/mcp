@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from kubernetes.client.rest import ApiException
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import TransportSecuritySettings
-from urllib3.exceptions import MaxRetryError, NewConnectionError
+from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 # Several of these are unused directly in this module — they're re-exported
 # so `from main import X` keeps working for tests/tools that reach the
@@ -151,16 +151,13 @@ app = FastAPI(
 app.mount("/mcp", create_mcp_streamable_http_app())
 
 
-@app.exception_handler(MaxRetryError)
-async def max_retry_error_handler(request: Request, exc: MaxRetryError):
-    return JSONResponse(
-        status_code=503,
-        content={"detail": "Kubernetes cluster is not available"},
-    )
-
-
-@app.exception_handler(NewConnectionError)
-async def new_connection_error_handler(request: Request, exc: NewConnectionError):
+# urllib3's HTTPError is the base of every transport-level failure the
+# kubernetes client can leak (MaxRetryError, NewConnectionError,
+# LocationValueError, ...) — which concrete subclass you get varies by
+# urllib3/kubernetes version, so handle the whole family as "cluster
+# unreachable" instead of enumerating subclasses that shift under us.
+@app.exception_handler(Urllib3HTTPError)
+async def k8s_transport_error_handler(request: Request, exc: Urllib3HTTPError):
     return JSONResponse(
         status_code=503,
         content={"detail": "Kubernetes cluster is not available"},

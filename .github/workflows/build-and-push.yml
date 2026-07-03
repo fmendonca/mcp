@@ -53,10 +53,10 @@ jobs:
     needs: validate
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -90,10 +90,10 @@ jobs:
     needs: validate
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v5
         with:
           version: 'latest'
 
@@ -110,10 +110,10 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Install Podman
         run: |
@@ -140,7 +140,7 @@ jobs:
         # creates the release for this tag with a GHCR changelog body.
         # append_body here so this step adds the Quay section instead of
         # clobbering it if both workflows run for the same tag.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           append_body: true
           body: |

@@ -191,15 +191,18 @@ class TestVmClone:
             "spec": {"running": False, "template": {}},
             "status": {},
         }
-        with patch.object(
-            custom_objects,
-            "get_namespaced_custom_object",
-            return_value=source_vm,
-        ), patch.object(
-            custom_objects,
-            "create_namespaced_custom_object",
-            return_value={"metadata": {"name": "my-vm-clone"}},
-        ) as create_call:
+        with (
+            patch.object(
+                custom_objects,
+                "get_namespaced_custom_object",
+                return_value=source_vm,
+            ),
+            patch.object(
+                custom_objects,
+                "create_namespaced_custom_object",
+                return_value={"metadata": {"name": "my-vm-clone"}},
+            ) as create_call,
+        ):
             response = client.post(
                 "/api/v1/namespaces/my-ns/virtualmachines/my-vm/clone",
                 json={"new_vm_name": "my-vm-clone"},

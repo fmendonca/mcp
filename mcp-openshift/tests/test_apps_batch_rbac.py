@@ -116,9 +116,10 @@ class TestDeployments:
             ),
             status=k8s.V1DeploymentStatus(),
         )
-        with patch.object(
-            apps_v1, "read_namespaced_deployment", return_value=dep
-        ), patch.object(apps_v1, "patch_namespaced_deployment", return_value=dep):
+        with (
+            patch.object(apps_v1, "read_namespaced_deployment", return_value=dep),
+            patch.object(apps_v1, "patch_namespaced_deployment", return_value=dep),
+        ):
             response = client.patch(
                 "/api/v1/namespaces/my-ns/deployments/my-dep/containers/app/resources",
                 json={"limits": {"cpu": "500m"}},

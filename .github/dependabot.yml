@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # Python dependencies (requirements.txt + requirements-dev.txt)
+  - package-ecosystem: pip
+    directory: /mcp-openshift
+    schedule:
+      interval: weekly
+    target-branch: dev
+    groups:
+      python-deps:
+        patterns:
+          - "*"
+
+  # GitHub Actions versions in .github/workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: dev
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Base images in both Dockerfiles
+  - package-ecosystem: docker
+    directory: /mcp-openshift
+    schedule:
+      interval: weekly
+    target-branch: dev
+    groups:
+      base-images:
+        patterns:
+          - "*"

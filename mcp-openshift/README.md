@@ -345,6 +345,23 @@ curl http://localhost:8000/metrics
 Scrape it with a standard Prometheus `ServiceMonitor`/`PodMonitor`, or point
 a `scrape_config` directly at the Service on port 8000.
 
+### Audit log
+
+Every mutating operation (delete pod, scale/rollout-restart workloads,
+create namespace/project/OLM resources, VM power actions, snapshots,
+must-gather) emits one JSON record to the `mcp_openshift.audit` logger on
+stdout, whether invoked over REST or MCP:
+
+```json
+{"audit": true, "action": "delete_pod", "outcome": "success",
+ "timestamp": "2026-07-03T12:00:00+00:00", "namespace": "prod", "pod_name": "api-1"}
+```
+
+Failures are recorded too (`"outcome": "error"` plus the HTTP status).
+Request bodies are never logged — only scalar arguments. Auth is a single
+shared bearer token, so records identify the action, not a per-user
+caller.
+
 ---
 
 ## Security

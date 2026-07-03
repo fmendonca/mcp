@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 
 from kubernetes.client.rest import ApiException
 
+from audit import audited
 from config import (
     MACHINE_CONFIG_GROUP,
     MACHINE_CONFIG_VERSION,
@@ -101,6 +102,7 @@ def get_project_data(project_name: str) -> Dict[str, Any]:
     )
 
 
+@audited("create_project")
 def create_project_data(
     project_name: str,
     display_name: Optional[str] = None,
@@ -153,6 +155,7 @@ def get_deployment_config_data(namespace: str, name: str) -> Dict[str, Any]:
     )
 
 
+@audited("rollout_restart_deployment_config")
 def rollout_restart_deployment_config_data(namespace: str, name: str) -> Dict[str, Any]:
     path = f"/apis/apps.openshift.io/v1/namespaces/{validated_name(namespace)}/deploymentconfigs/{validated_name(name)}/instantiate"
     body = {

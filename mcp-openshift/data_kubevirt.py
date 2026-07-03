@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from kubernetes.client.rest import ApiException
 
+from audit import audited
 from config import (
     KUBEVIRT_GROUP,
     KUBEVIRT_VERSION,
@@ -67,6 +68,7 @@ def get_vmi_data(namespace: str, vmi_name: str) -> Dict[str, Any]:
     )
 
 
+@audited("vm_power_action")
 def _vm_power_action(namespace: str, vm_name: str, action: str) -> Dict[str, Any]:
     path = f"/apis/subresources.kubevirt.io/v1/namespaces/{validated_name(namespace)}/virtualmachines/{validated_name(vm_name)}/{action}"
     try:
@@ -85,6 +87,7 @@ def _vm_power_action(namespace: str, vm_name: str, action: str) -> Dict[str, Any
     return {"status": f"vm_{action}_requested", "name": vm_name, "namespace": namespace}
 
 
+@audited("clone_virtualmachine")
 def clone_virtualmachine_data(
     namespace: str, vm_name: str, new_vm_name: str
 ) -> Dict[str, Any]:
@@ -124,6 +127,7 @@ def unpause_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
     return _vm_power_action(namespace, vm_name, "unpause")
 
 
+@audited("force_reboot_virtualmachine")
 def force_reboot_virtualmachine_data(namespace: str, vm_name: str) -> Dict[str, Any]:
     path = f"/apis/subresources.kubevirt.io/v1/namespaces/{validated_name(namespace)}/virtualmachines/{validated_name(vm_name)}/reboot"
     body = {"force": True}
@@ -154,6 +158,7 @@ def list_vm_snapshots_data(namespace: str) -> Dict[str, Any]:
     )
 
 
+@audited("create_vm_snapshot")
 def create_vm_snapshot_data(
     namespace: str, vm_name: str, snapshot_name: str
 ) -> Dict[str, Any]:
@@ -183,6 +188,7 @@ def create_vm_snapshot_data(
         raise api_error(e, "Could not create snapshot")
 
 
+@audited("delete_vm_snapshot")
 def delete_vm_snapshot_data(namespace: str, snapshot_name: str) -> Dict[str, Any]:
     try:
         custom_objects.delete_namespaced_custom_object(

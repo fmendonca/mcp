@@ -71,22 +71,28 @@ class TestConfigureKubernetes:
             assert configure_kubernetes() is True
 
     def test_falls_back_to_kube_config(self):
-        with patch.object(
-            k8s_config,
-            "load_incluster_config",
-            side_effect=k8s_config.ConfigException("no in-cluster config"),
-        ), patch.object(k8s_config, "load_kube_config", return_value=None):
+        with (
+            patch.object(
+                k8s_config,
+                "load_incluster_config",
+                side_effect=k8s_config.ConfigException("no in-cluster config"),
+            ),
+            patch.object(k8s_config, "load_kube_config", return_value=None),
+        ):
             assert configure_kubernetes() is True
 
     def test_both_configs_fail(self):
-        with patch.object(
-            k8s_config,
-            "load_incluster_config",
-            side_effect=k8s_config.ConfigException("no in-cluster config"),
-        ), patch.object(
-            k8s_config,
-            "load_kube_config",
-            side_effect=k8s_config.ConfigException("no kube config"),
+        with (
+            patch.object(
+                k8s_config,
+                "load_incluster_config",
+                side_effect=k8s_config.ConfigException("no in-cluster config"),
+            ),
+            patch.object(
+                k8s_config,
+                "load_kube_config",
+                side_effect=k8s_config.ConfigException("no kube config"),
+            ),
         ):
             assert configure_kubernetes() is False
 
@@ -826,10 +832,13 @@ class TestMustGatherLogs:
         from main import core_v1
 
         pod = k8s.V1Pod(metadata=k8s.V1ObjectMeta(name="my-job-abcde"))
-        with patch.object(
-            core_v1, "list_namespaced_pod", return_value=k8s.V1PodList(items=[pod])
-        ), patch.object(
-            core_v1, "read_namespaced_pod_log", return_value="gathering logs..."
+        with (
+            patch.object(
+                core_v1, "list_namespaced_pod", return_value=k8s.V1PodList(items=[pod])
+            ),
+            patch.object(
+                core_v1, "read_namespaced_pod_log", return_value="gathering logs..."
+            ),
         ):
             response = client.get(
                 "/api/v1/namespaces/mcp-server/must-gather/my-job/logs"

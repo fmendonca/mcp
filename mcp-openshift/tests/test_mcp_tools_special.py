@@ -148,11 +148,14 @@ class TestListRbac:
     """Test suite for the composite list_rbac tool."""
 
     def test_combines_roles_and_role_bindings(self):
-        with patch.object(
-            mcp_tools, "list_roles_data", return_value={"count": 1}
-        ) as mock_roles, patch.object(
-            mcp_tools, "list_role_bindings_data", return_value={"count": 2}
-        ) as mock_bindings:
+        with (
+            patch.object(
+                mcp_tools, "list_roles_data", return_value={"count": 1}
+            ) as mock_roles,
+            patch.object(
+                mcp_tools, "list_role_bindings_data", return_value={"count": 2}
+            ) as mock_bindings,
+        ):
             result = mcp_tools.list_rbac("my-ns")
 
         assert result == {"roles": {"count": 1}, "role_bindings": {"count": 2}}
@@ -164,11 +167,14 @@ class TestListClusterRbac:
     """Test suite for the composite list_cluster_rbac tool."""
 
     def test_combines_cluster_roles_and_bindings(self):
-        with patch.object(
-            mcp_tools, "list_cluster_roles_data", return_value={"count": 3}
-        ) as mock_roles, patch.object(
-            mcp_tools, "list_cluster_role_bindings_data", return_value={"count": 4}
-        ) as mock_bindings:
+        with (
+            patch.object(
+                mcp_tools, "list_cluster_roles_data", return_value={"count": 3}
+            ) as mock_roles,
+            patch.object(
+                mcp_tools, "list_cluster_role_bindings_data", return_value={"count": 4}
+            ) as mock_bindings,
+        ):
             result = mcp_tools.list_cluster_rbac()
 
         assert result == {

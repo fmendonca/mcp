@@ -30,7 +30,7 @@ jobs:
       changelog: ${{ steps.changelog.outputs.text }}
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -84,16 +84,16 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU (multi-arch emulation)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Extract image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/mcp-openshift
           tags: |
@@ -116,7 +116,7 @@ jobs:
 
       - name: Build and push (linux/amd64 + linux/arm64)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: mcp-openshift
           file: mcp-openshift/Dockerfile.ubi9
@@ -126,6 +126,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             APP_VERSION=${{ needs.version.outputs.version }}
+          # Attach a signed SLSA provenance attestation and an SPDX SBOM to
+          # the pushed image so consumers can verify what was built, from
+          # what source, and with which dependencies.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -138,10 +143,10 @@ jobs:
     needs: [version, build-push]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Helm
-        uses: azure/setup-helm@v3
+        uses: azure/setup-helm@v5
         with:
           version: 'latest'
 
@@ -172,7 +177,7 @@ jobs:
     needs: [version, build-push, publish-chart]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           # Tags pushed with the default GITHUB_TOKEN do NOT trigger other
@@ -191,7 +196,7 @@ jobs:
           git push origin "${{ needs.version.outputs.tag }}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: "mcp-openshift ${{ needs.version.outputs.tag }}"

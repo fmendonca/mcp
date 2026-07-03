@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
+from audit import audited
 from config import (
     DEFAULT_MUST_GATHER_IMAGE,
     OLM_GROUP,
@@ -65,6 +66,7 @@ def list_catalog_sources_data(namespace: str) -> Dict[str, Any]:
     )
 
 
+@audited("create_operator_group")
 def create_operator_group_data(
     namespace: str,
     name: str = "mcp-operator-group",
@@ -98,6 +100,7 @@ def create_operator_group_data(
         raise api_error(e)
 
 
+@audited("create_olm_subscription")
 def create_olm_subscription_data(
     namespace: str,
     package_name: str,
@@ -200,6 +203,7 @@ def install_olm_operator_data(
     }
 
 
+@audited("start_must_gather")
 def start_must_gather_data(
     namespace: str = "mcp-server",
     name: Optional[str] = None,

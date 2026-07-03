@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException
 from kubernetes.client.rest import ApiException
 
+from audit import audited
 from config import apps_v1, autoscaling_v2, batch_v1, networking_v1, rbac_v1
 from errors import api_error
 from models import ResourceRequirementsPatch
@@ -55,6 +56,7 @@ def get_deployment_data(namespace: str, deployment_name: str) -> Dict[str, Any]:
         raise api_error(e, "Deployment not found")
 
 
+@audited("rollout_restart_deployment")
 def rollout_restart_deployment_data(
     namespace: str, deployment_name: str
 ) -> Dict[str, Any]:
@@ -84,6 +86,7 @@ def rollout_restart_deployment_data(
         raise api_error(e, "Deployment not found")
 
 
+@audited("scale_deployment")
 def scale_deployment_data(
     namespace: str, deployment_name: str, replicas: int
 ) -> Dict[str, Any]:
@@ -103,6 +106,7 @@ def scale_deployment_data(
         raise api_error(e, "Deployment not found")
 
 
+@audited("update_deployment_container_resources")
 def update_deployment_container_resources_data(
     namespace: str,
     deployment_name: str,
@@ -180,6 +184,7 @@ def get_statefulset_data(namespace: str, name: str) -> Dict[str, Any]:
         raise api_error(e, "StatefulSet not found")
 
 
+@audited("rollout_restart_statefulset")
 def rollout_restart_statefulset_data(namespace: str, name: str) -> Dict[str, Any]:
     try:
         restarted_at = datetime.now(timezone.utc).isoformat()
@@ -207,6 +212,7 @@ def rollout_restart_statefulset_data(namespace: str, name: str) -> Dict[str, Any
         raise api_error(e, "StatefulSet not found")
 
 
+@audited("scale_statefulset")
 def scale_statefulset_data(namespace: str, name: str, replicas: int) -> Dict[str, Any]:
     try:
         apps_v1.patch_namespaced_stateful_set(

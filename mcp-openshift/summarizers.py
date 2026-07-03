@@ -352,7 +352,7 @@ def summarize_service(service: Any) -> Dict[str, Any]:
         **object_metadata(service),
         "type": service.spec.type,
         "cluster_ip": service.spec.cluster_ip,
-        "external_ips": service.spec.external_i_ps or [],
+        "external_ips": service.spec.external_ips or [],
         "ports": [p.to_dict() for p in (service.spec.ports or [])],
         "selector": service.spec.selector or {},
     }

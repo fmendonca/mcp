@@ -1,4 +1,4 @@
-FROM alpine:3.21
+FROM alpine:3.24
 
 # Single source of truth for the running app's self-reported version — set
 # by CI to the actual tag/version being built (see build.sh). Never hardcode
@@ -7,8 +7,8 @@ ARG APP_VERSION=0.0.0-dev
 ENV APP_VERSION=${APP_VERSION}
 
 RUN apk add --no-cache \
-    python3=3.12.13-r0 \
-    py3-pip=24.3.1-r0 && \
+    python3=3.14.5-r0 \
+    py3-pip=26.1.2-r0 && \
     pip3 install --no-cache-dir --break-system-packages --upgrade 'pip>=26.1' 'setuptools>=78.1.1' && \
     adduser -D -u 1001 -g mcpuser mcpuser
 

@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
+from audit import audited
 from config import core_v1, storage_v1
 from errors import api_error
 from models import DeleteOptions, LogQuery
@@ -46,6 +47,7 @@ def get_namespace_data(namespace: str) -> Dict[str, Any]:
         raise api_error(e, "Namespace not found")
 
 
+@audited("create_namespace")
 def create_namespace_data(
     namespace: str,
     labels: Optional[Dict[str, str]] = None,
@@ -103,6 +105,7 @@ def get_pod_data(namespace: str, pod_name: str) -> Dict[str, Any]:
         raise api_error(e, "Pod not found")
 
 
+@audited("delete_pod")
 def delete_pod_data(
     namespace: str, pod_name: str, options: Optional[DeleteOptions] = None
 ) -> Dict[str, Any]:

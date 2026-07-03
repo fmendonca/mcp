@@ -17,8 +17,11 @@ def client():
 @pytest.fixture
 def mock_kubernetes():
     """Mock Kubernetes API client."""
-    with patch("main.core_v1"), patch("main.apps_v1"), patch("main.batch_v1"), patch(
-        "main.custom_objects"
+    with (
+        patch("main.core_v1"),
+        patch("main.apps_v1"),
+        patch("main.batch_v1"),
+        patch("main.custom_objects"),
     ):
         yield
 

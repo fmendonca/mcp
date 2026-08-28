@@ -62,6 +62,14 @@ from data_core import (
     list_services_data,
     list_storage_classes_data,
 )
+from data_deploy import (
+    apply_yaml_data,
+    create_build_config_data,
+    create_build_data,
+    deploy_helm_data,
+    get_helm_deploy_logs_data,
+    start_build_config_data,
+)
 from data_kubevirt import (
     _vm_power_action,
     clone_virtualmachine_data,
@@ -583,6 +591,36 @@ def get_build(namespace: str, build_name: str) -> Dict[str, Any]:
     return get_build_data(namespace, build_name)
 
 
+@mcp.tool()
+def start_build_config(
+    namespace: str,
+    build_config_name: str,
+    env: Optional[Dict[str, str]] = None,
+    commit: Optional[str] = None,
+    message: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Start an OpenShift BuildConfig and return the created Build."""
+    return start_build_config_data(
+        namespace,
+        build_config_name,
+        env=env,
+        commit=commit,
+        message=message,
+    )
+
+
+@mcp.tool()
+def create_build(namespace: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Create an OpenShift Build from a Build manifest dictionary."""
+    return create_build_data(namespace, manifest)
+
+
+@mcp.tool()
+def create_build_config(namespace: str, manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Create an OpenShift BuildConfig from a BuildConfig manifest dictionary."""
+    return create_build_config_data(namespace, manifest)
+
+
 # --- MCP tools: OpenShift image streams ---
 @mcp.tool()
 def list_image_streams(namespace: str) -> Dict[str, Any]:
@@ -802,6 +840,69 @@ def start_must_gather(
 def get_must_gather_logs(namespace: str, job_name: str) -> Dict[str, Any]:
     """Read logs from a must-gather Job started by start_must_gather."""
     return get_must_gather_logs_data(namespace, job_name)
+
+
+# --- MCP tools: deploy operations ---
+@mcp.tool()
+def apply_yaml(
+    manifest: str,
+    namespace: Optional[str] = None,
+    dry_run: bool = False,
+    field_manager: str = "mcp-openshift",
+) -> Dict[str, Any]:
+    """Apply one or more Kubernetes/OpenShift YAML objects with server-side apply."""
+    return apply_yaml_data(
+        manifest,
+        namespace=namespace,
+        dry_run=dry_run,
+        field_manager=field_manager,
+    )
+
+
+@mcp.tool()
+def deploy_helm(
+    release_name: str,
+    chart: str,
+    namespace: str,
+    repo_url: Optional[str] = None,
+    chart_version: Optional[str] = None,
+    values: Optional[Dict[str, Any]] = None,
+    values_yaml: Optional[str] = None,
+    create_namespace: bool = True,
+    wait: bool = False,
+    timeout: str = "10m",
+    job_namespace: str = "mcp-server",
+    job_name: Optional[str] = None,
+    image: Optional[str] = None,
+    service_account_name: str = "mcp-openshift",
+    ttl_seconds_after_finished: int = 86400,
+    active_deadline_seconds: int = 1800,
+) -> Dict[str, Any]:
+    """Run helm upgrade --install in-cluster through a short-lived Job."""
+    return deploy_helm_data(
+        release_name=release_name,
+        chart=chart,
+        namespace=namespace,
+        repo_url=repo_url,
+        chart_version=chart_version,
+        values=values,
+        values_yaml=values_yaml,
+        create_namespace=create_namespace,
+        wait=wait,
+        timeout=timeout,
+        job_namespace=job_namespace,
+        job_name=job_name,
+        image=image,
+        service_account_name=service_account_name,
+        ttl_seconds_after_finished=ttl_seconds_after_finished,
+        active_deadline_seconds=active_deadline_seconds,
+    )
+
+
+@mcp.tool()
+def get_helm_deploy_logs(namespace: str, job_name: str) -> Dict[str, Any]:
+    """Read logs from a Helm deploy Job started by deploy_helm."""
+    return get_helm_deploy_logs_data(namespace, job_name)
 
 
 # --- MCP tools: KubeVirt ---

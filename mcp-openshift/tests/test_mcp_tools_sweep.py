@@ -215,6 +215,27 @@ SIMPLE_TOOL_CASES = [
         "get_build_data",
         dict(namespace="namespace-val", build_name="build_name-val"),
     ),
+    (
+        "start_build_config",
+        "start_build_config_data",
+        dict(
+            namespace="namespace-val",
+            build_config_name="build_config_name-val",
+            env=None,
+            commit=None,
+            message=None,
+        ),
+    ),
+    (
+        "create_build",
+        "create_build_data",
+        dict(namespace="namespace-val", manifest={"kind": "Build"}),
+    ),
+    (
+        "create_build_config",
+        "create_build_config_data",
+        dict(namespace="namespace-val", manifest={"kind": "BuildConfig"}),
+    ),
     ("list_image_streams", "list_image_streams_data", dict(namespace="namespace-val")),
     (
         "get_image_stream",
@@ -318,6 +339,41 @@ SIMPLE_TOOL_CASES = [
     (
         "get_must_gather_logs",
         "get_must_gather_logs_data",
+        dict(namespace="namespace-val", job_name="job_name-val"),
+    ),
+    (
+        "apply_yaml",
+        "apply_yaml_data",
+        dict(
+            manifest="apiVersion: v1\nkind: Namespace\nmetadata:\n  name: test\n",
+            namespace=None,
+            dry_run=False,
+            field_manager="mcp-openshift",
+        ),
+    ),
+    (
+        "deploy_helm",
+        "deploy_helm_data",
+        dict(
+            release_name="release_name-val",
+            chart="chart-val",
+            namespace="namespace-val",
+            repo_url=None,
+            chart_version=None,
+            values=None,
+            values_yaml=None,
+            create_namespace=True,
+            wait=False,
+            timeout="10m",
+            job_namespace="mcp-server",
+            job_name=None,
+            image=None,
+            service_account_name="mcp-openshift",
+        ),
+    ),
+    (
+        "get_helm_deploy_logs",
+        "get_helm_deploy_logs_data",
         dict(namespace="namespace-val", job_name="job_name-val"),
     ),
     (

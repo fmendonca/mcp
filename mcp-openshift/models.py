@@ -1,6 +1,6 @@
 """Pydantic request models for REST and MCP tool inputs."""
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -81,3 +81,39 @@ class MustGatherRequest(BaseModel):
     image: Optional[str] = None
     service_account_name: str = "mcp-openshift"
     timeout_seconds: int = Field(default=3600, ge=60, le=86400)
+
+
+class YAMLApplyRequest(BaseModel):
+    manifest: str = Field(min_length=1, max_length=1_000_000)
+    namespace: Optional[str] = None
+    dry_run: bool = False
+    field_manager: str = "mcp-openshift"
+
+
+class HelmDeployRequest(BaseModel):
+    release_name: str
+    chart: str
+    namespace: str
+    repo_url: Optional[str] = None
+    chart_version: Optional[str] = None
+    values: Optional[Dict[str, Any]] = None
+    values_yaml: Optional[str] = Field(default=None, max_length=500_000)
+    create_namespace: bool = True
+    wait: bool = False
+    timeout: str = "10m"
+    job_namespace: str = "mcp-server"
+    job_name: Optional[str] = None
+    image: Optional[str] = None
+    service_account_name: str = "mcp-openshift"
+    ttl_seconds_after_finished: int = Field(default=86400, ge=60, le=604800)
+    active_deadline_seconds: int = Field(default=1800, ge=60, le=86400)
+
+
+class BuildConfigStartRequest(BaseModel):
+    env: Optional[Dict[str, str]] = None
+    commit: Optional[str] = None
+    message: Optional[str] = None
+
+
+class BuildCreateRequest(BaseModel):
+    manifest: Dict[str, Any]

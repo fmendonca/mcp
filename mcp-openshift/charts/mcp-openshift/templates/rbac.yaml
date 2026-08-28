@@ -85,6 +85,10 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "delete"]
+  # Generic deploy/admin scope for apply_yaml and in-cluster Helm upgrades.
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["create", "patch", "update", "delete"]
   # RBAC
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
@@ -107,7 +111,10 @@ rules:
   # OpenShift Build
   - apiGroups: ["build.openshift.io"]
     resources: ["buildconfigs", "builds"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "create", "patch", "update", "delete"]
+  - apiGroups: ["build.openshift.io"]
+    resources: ["buildconfigs/instantiate"]
+    verbs: ["create"]
   # OpenShift Image
   - apiGroups: ["image.openshift.io"]
     resources: ["imagestreams", "imagestreamtags"]

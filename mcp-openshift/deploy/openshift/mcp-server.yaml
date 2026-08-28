@@ -109,6 +109,9 @@ rules:
 - apiGroups: ["batch"]
   resources: ["jobs"]
   verbs: ["create", "delete"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["create", "patch", "update", "delete"]
 - apiGroups: ["rbac.authorization.k8s.io"]
   resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
   verbs: ["get", "list"]
@@ -126,7 +129,10 @@ rules:
   verbs: ["get", "list", "patch", "update"]
 - apiGroups: ["build.openshift.io"]
   resources: ["buildconfigs", "builds"]
-  verbs: ["get", "list"]
+  verbs: ["get", "list", "create", "patch", "update", "delete"]
+- apiGroups: ["build.openshift.io"]
+  resources: ["buildconfigs/instantiate"]
+  verbs: ["create"]
 - apiGroups: ["image.openshift.io"]
   resources: ["imagestreams", "imagestreamtags"]
   verbs: ["get", "list"]
@@ -205,13 +211,15 @@ spec:
           type: RuntimeDefault
       containers:
       - name: mcp-openshift
-        image: quay.io/fcalomen/mcp:openshift-0.0.13
+        image: quay.io/fcalomen/mcp:openshift-0.0.22
         imagePullPolicy: Always
         env:
         - name: MCP_ALLOWED_HOSTS
           value: "mcp-openshift-mcp-server.apps.sno.openocp.com,mcp-openshift-mcp-server.apps.sno.openocp.com:*,127.0.0.1:*,localhost:*"
         - name: MCP_ALLOWED_ORIGINS
           value: "https://mcp-openshift-mcp-server.apps.sno.openocp.com,https://mcp-openshift-mcp-server.apps.sno.openocp.com:*,http://127.0.0.1:*,http://localhost:*"
+        - name: HELM_RUNNER_IMAGE
+          value: "alpine/helm:latest"
         - name: MCP_AUTH_TOKEN
           valueFrom:
             secretKeyRef:

@@ -6,7 +6,7 @@ replicaCount: 1
 
 image:
   repository: quay.io/fcalomen/mcp
-  tag: "openshift-0.0.13"
+  tag: "openshift-0.0.22"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -24,6 +24,7 @@ auth:
   token: ""
 
 mcp:
+  helmRunnerImage: alpine/helm:latest
   allowedHosts:
     # Add your allowed hostnames here (e.g., "mcp.example.com", "*.apps.cluster.openshift.com:*")
     - 127.0.0.1:*

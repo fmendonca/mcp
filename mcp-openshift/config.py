@@ -44,6 +44,7 @@ OLM_OPERATOR_GROUP_VERSION = "v1"
 DEFAULT_MUST_GATHER_IMAGE = os.getenv(
     "MUST_GATHER_IMAGE", "registry.redhat.io/openshift4/ose-must-gather-rhel9:v4.22"
 )
+DEFAULT_HELM_RUNNER_IMAGE = os.getenv("HELM_RUNNER_IMAGE", "alpine/helm:latest")
 
 KUBEVIRT_GROUP = "kubevirt.io"
 KUBEVIRT_VERSION = "v1"

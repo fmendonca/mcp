@@ -2,9 +2,9 @@
 
 MCP and REST server for full administrative access to OpenShift/Kubernetes clusters.
 
-**Version:** 0.0.13
+**Version:** 0.0.22
 **UBI9 image:** `ghcr.io/fmendonca/mcp-openshift:latest`
-**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.13`
+**Alpine image:** `quay.io/fcalomen/mcp:openshift-0.0.22`
 
 [![Tests](https://github.com/fmendonca/mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/tests.yml)
 [![Release](https://github.com/fmendonca/mcp/actions/workflows/release.yml/badge.svg)](https://github.com/fmendonca/mcp/actions/workflows/release.yml)
@@ -23,10 +23,10 @@ MCP and REST server for full administrative access to OpenShift/Kubernetes clust
 podman pull ghcr.io/fmendonca/mcp-openshift:latest
 
 # UBI9 — pin to a specific version
-podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.13
+podman pull ghcr.io/fmendonca/mcp-openshift:v0.0.22
 
 # Alpine
-podman pull quay.io/fcalomen/mcp:openshift-0.0.13
+podman pull quay.io/fcalomen/mcp:openshift-0.0.22
 ```
 
 ---
@@ -75,8 +75,8 @@ podman pull quay.io/fcalomen/mcp:openshift-0.0.13
 | Projects | list, get, create |
 | Routes | list, get |
 | DeploymentConfigs | list, get, rollout restart |
-| BuildConfigs | list, get |
-| Builds | list, get |
+| BuildConfigs | list, get, create, start build |
+| Builds | list, get, create |
 | ImageStreams | list, get |
 | SecurityContextConstraints | list, get |
 | Users | list, get |
@@ -92,6 +92,13 @@ podman pull quay.io/fcalomen/mcp:openshift-0.0.13
 | CatalogSources | list |
 | AMQ Streams | install through OLM shortcut |
 | Must-gather | start Job, read logs |
+
+### Deploy operations
+| Capability | Operations |
+|---|---|
+| YAML manifests | server-side apply one or more Kubernetes/OpenShift objects |
+| Helm charts | run `helm upgrade --install` through an in-cluster Job |
+| Helm logs | read logs from Helm deploy Jobs |
 
 ### KubeVirt
 | Resource | Operations |
@@ -182,7 +189,7 @@ podman manifest push --all ghcr.io/fmendonca/mcp-openshift:dev \
 
 ```bash
 cd mcp-openshift
-VERSION=0.0.13 ./build.sh
+VERSION=0.0.22 ./build.sh
 ```
 
 ---
@@ -372,7 +379,7 @@ caller.
 | Container | Runs as non-root UID 1001, all Linux capabilities dropped, privilege escalation disabled, read-only root filesystem |
 | Input validation | Resource names validated with regex before reaching the Kubernetes API |
 | Secret exposure | Server never exposes Kubernetes Secret values — only metadata |
-| RBAC | Operational RBAC for supported actions, including broad read-only access for must-gather, `create` on namespaces, ProjectRequests, OLM Subscriptions/OperatorGroups, Jobs, `pods/exec`, and temporary DaemonSets used by must-gather |
+| RBAC | Operational RBAC for supported actions, including broad read-only access for must-gather, deployment-admin verbs for YAML/Helm deploys, `create` on namespaces, ProjectRequests, OLM Subscriptions/OperatorGroups, Jobs, Builds, `pods/exec`, and temporary DaemonSets used by must-gather |
 | Security headers | `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection` on every response |
 | Error messages | Kubernetes internals never leaked in error responses |
 | CVE scanning | `pip-audit` and `bandit` run on every CI push |
@@ -386,6 +393,7 @@ caller.
 | `MCP_AUTH_TOKEN` | Bearer token for client authentication | unset (auth disabled) |
 | `MCP_ALLOWED_HOSTS` | Comma-separated allowed Host headers | `127.0.0.1:*,localhost:*,[::1]:*` |
 | `MCP_ALLOWED_ORIGINS` | Comma-separated allowed CORS origins | `http://127.0.0.1:*,http://localhost:*` |
+| `HELM_RUNNER_IMAGE` | Image used by `deploy_helm` Jobs | `alpine/helm:latest` |
 
 ---
 
@@ -449,7 +457,10 @@ POST /api/v1/projects  body: {"name": "example", "display_name": "Example", "des
 GET  /api/v1/namespaces/{namespace}/deploymentconfigs[/{name}]
 POST /api/v1/namespaces/{namespace}/deploymentconfigs/{name}/rollout/restart
 GET  /api/v1/namespaces/{namespace}/buildconfigs[/{name}]
+POST /api/v1/namespaces/{namespace}/buildconfigs
+POST /api/v1/namespaces/{namespace}/buildconfigs/{name}/instantiate
 GET  /api/v1/namespaces/{namespace}/builds[/{name}]
+POST /api/v1/namespaces/{namespace}/builds
 GET  /api/v1/namespaces/{namespace}/imagestreams[/{name}]
 GET  /api/v1/securitycontextconstraints[/{name}]
 GET  /api/v1/users[/{name}]
@@ -468,6 +479,9 @@ POST /api/v1/operators/install
 POST /api/v1/operators/amq-streams
 POST /api/v1/must-gather
 GET  /api/v1/namespaces/{namespace}/must-gather/{job_name}/logs
+POST /api/v1/yaml/apply
+POST /api/v1/helm/deploy
+GET  /api/v1/namespaces/{namespace}/helm/{job_name}/logs
 GET  /api/v1/namespaces/{namespace}/virtualmachines[/{vm_name}]
 PUT  /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/start
 PUT  /api/v1/namespaces/{namespace}/virtualmachines/{vm_name}/stop

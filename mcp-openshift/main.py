@@ -118,7 +118,8 @@ mcp = FastMCP(
         "KubeVirt VMs and VMIs. "
         "Mutate: restart/scale deployments and statefulsets, delete pods, update resources, "
         "create namespaces/projects, install OLM operators, trigger must-gather jobs, "
-        "trigger DC rollouts, start/stop/restart VMs."
+        "apply Kubernetes/OpenShift YAML, deploy Helm charts through in-cluster Jobs, "
+        "create/start OpenShift Builds, trigger DC rollouts, start/stop/restart VMs."
     ),
     **accepted_kwargs(FastMCP, MCP_TRANSPORT_KWARGS),
 )

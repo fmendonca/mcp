@@ -2,7 +2,7 @@
 # Build and push multi-arch (arm64 + amd64) image to quay.io/fcalomen/mcp
 set -euo pipefail
 
-VERSION="${VERSION:?VERSION env var is required, e.g. VERSION=0.0.13 ./build.sh}"
+VERSION="${VERSION:?VERSION env var is required, e.g. VERSION=0.0.22 ./build.sh}"
 
 # Validate version format
 if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

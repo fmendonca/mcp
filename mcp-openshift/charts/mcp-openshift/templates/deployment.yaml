@@ -30,6 +30,8 @@ spec:
               value: {{ join "," .Values.mcp.allowedHosts | quote }}
             - name: MCP_ALLOWED_ORIGINS
               value: {{ join "," .Values.mcp.allowedOrigins | quote }}
+            - name: HELM_RUNNER_IMAGE
+              value: {{ .Values.mcp.helmRunnerImage | quote }}
             {{- if .Values.auth.enabled }}
             - name: MCP_AUTH_TOKEN
               valueFrom:

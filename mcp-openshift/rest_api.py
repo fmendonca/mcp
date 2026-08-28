@@ -65,6 +65,14 @@ from data_core import (
     list_services_data,
     list_storage_classes_data,
 )
+from data_deploy import (
+    apply_yaml_data,
+    create_build_config_data,
+    create_build_data,
+    deploy_helm_data,
+    get_helm_deploy_logs_data,
+    start_build_config_data,
+)
 from data_kubevirt import (
     _vm_power_action,
     clone_virtualmachine_data,
@@ -126,7 +134,10 @@ from data_openshift import (
 from main import app
 from models import (
     AMQStreamsInstallRequest,
+    BuildConfigStartRequest,
+    BuildCreateRequest,
     DeleteOptions,
+    HelmDeployRequest,
     LogQuery,
     MustGatherRequest,
     NamespaceCreateRequest,
@@ -136,6 +147,7 @@ from models import (
     ProjectCreateRequest,
     ResourceRequirementsPatch,
     ScaleRequest,
+    YAMLApplyRequest,
 )
 
 # ============================================================
@@ -541,6 +553,34 @@ def rest_get_build(namespace: str, name: str):
     return get_build_data(namespace, name)
 
 
+@app.post("/api/v1/namespaces/{namespace}/buildconfigs", status_code=201)
+def rest_create_build_config(namespace: str, request: BuildCreateRequest):
+    return create_build_config_data(namespace, request.manifest)
+
+
+@app.post(
+    "/api/v1/namespaces/{namespace}/buildconfigs/{name}/instantiate", status_code=201
+)
+def rest_start_build_config(
+    namespace: str,
+    name: str,
+    request: Optional[BuildConfigStartRequest] = Body(default=None),
+):
+    request = request or BuildConfigStartRequest()
+    return start_build_config_data(
+        namespace,
+        name,
+        env=request.env,
+        commit=request.commit,
+        message=request.message,
+    )
+
+
+@app.post("/api/v1/namespaces/{namespace}/builds", status_code=201)
+def rest_create_build(namespace: str, request: BuildCreateRequest):
+    return create_build_data(namespace, request.manifest)
+
+
 # OpenShift image streams
 @app.get("/api/v1/namespaces/{namespace}/imagestreams")
 def rest_list_image_streams(namespace: str):
@@ -700,6 +740,44 @@ def rest_start_must_gather(request: MustGatherRequest):
 @app.get("/api/v1/namespaces/{namespace}/must-gather/{job_name}/logs")
 def rest_get_must_gather_logs(namespace: str, job_name: str):
     return get_must_gather_logs_data(namespace, job_name)
+
+
+# Deploy operations
+@app.post("/api/v1/yaml/apply", status_code=201)
+def rest_apply_yaml(request: YAMLApplyRequest):
+    return apply_yaml_data(
+        request.manifest,
+        namespace=request.namespace,
+        dry_run=request.dry_run,
+        field_manager=request.field_manager,
+    )
+
+
+@app.post("/api/v1/helm/deploy", status_code=201)
+def rest_deploy_helm(request: HelmDeployRequest):
+    return deploy_helm_data(
+        release_name=request.release_name,
+        chart=request.chart,
+        namespace=request.namespace,
+        repo_url=request.repo_url,
+        chart_version=request.chart_version,
+        values=request.values,
+        values_yaml=request.values_yaml,
+        create_namespace=request.create_namespace,
+        wait=request.wait,
+        timeout=request.timeout,
+        job_namespace=request.job_namespace,
+        job_name=request.job_name,
+        image=request.image,
+        service_account_name=request.service_account_name,
+        ttl_seconds_after_finished=request.ttl_seconds_after_finished,
+        active_deadline_seconds=request.active_deadline_seconds,
+    )
+
+
+@app.get("/api/v1/namespaces/{namespace}/helm/{job_name}/logs")
+def rest_get_helm_deploy_logs(namespace: str, job_name: str):
+    return get_helm_deploy_logs_data(namespace, job_name)
 
 
 # KubeVirt
